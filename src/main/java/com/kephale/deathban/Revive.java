@@ -280,7 +280,7 @@ public final class Revive {
         if (pc == null) return false;
         try {
             GameProfile gp = pc.getGameProfile();
-            if (gp != null && target.equals(gp.Id())) return true;
+            if (gp != null && target.equals(gp.id())) return true;
             if (pc.getName().isPresent() && targetName.equalsIgnoreCase(pc.getName().get())) return true;
         } catch (Throwable t) {
             DeathBanMod.LOGGER.error("ProfileComponent accessors are named something else on this "
