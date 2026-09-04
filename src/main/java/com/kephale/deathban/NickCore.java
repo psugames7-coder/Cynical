@@ -1,5 +1,6 @@
 package com.kephale.deathban;
 
+import net.minecraft.server.world.ServerWorld;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
 import com.mojang.authlib.properties.PropertyMap;
@@ -24,18 +25,11 @@ import java.util.UUID;
  * Nicknames with a real name and skin change, the same behaviour the Bukkit
  * plugin had.
  *
- * <p>Approach, adapted from the Nicked plugin (MIT): rewrite the player's
- * {@link GameProfile} name and textures by reflection, then force every other
- * client to re-request the profile by removing and re-adding them to the player
- * list and respawning their entity.
- *
- * <p>Skins come from Mojang's session server and are cached for half an hour.
- *
- * <p>The live {@link GameProfile} is never mutated. It became a Java record in
- * 1.21.2 and record fields cannot be reassigned reflectively at all, which is
- * why the old approach silently only ever changed the skin. Instead
- * {@link #profileFor} builds a substitute and
- * {@code PlayerListS2CPacketMixin} hands it to other clients at send time.
+ * <p>The live GameProfile is never mutated. It became a Java record in 1.21.2
+ * and record fields cannot be reassigned reflectively at all, which is why the
+ * old approach silently only ever changed the skin. Instead profileFor builds a
+ * substitute and PlayerListS2CPacketMixin hands it to other clients at send
+ * time.
  */
 public final class NickCore {
 
@@ -60,20 +54,19 @@ public final class NickCore {
     /**
      * The profile other clients should see. A fresh GameProfile carrying the
      * nick and its skin, built on demand, never a mutation of the live one.
-     * Returns the real profile untouched when the player is not nicked.
      */
     public GameProfile profileFor(ServerPlayerEntity player, GameProfile real) {
         UUID id = player.getUuid();
         String nick = nicks.get(id);
         if (nick == null) return real;
         try {
-            GameProfile out = new GameProfile(real.getId(), nick);
+            GameProfile out = new GameProfile(real.id(), nick);
             String[] skin = skinCache.get(nick.toLowerCase());
             if (skin != null && skin[0] != null) {
-                out.getProperties().put("textures", new Property("textures", skin[0], skin[1]));
+                out.properties().put("textures", new Property("textures", skin[0], skin[1]));
             } else {
-                for (Property pr : real.getProperties().get("textures")) {
-                    out.getProperties().put("textures", pr);
+                for (Property pr : real.properties().get("textures")) {
+                    out.properties().put("textures", pr);
                 }
             }
             return out;
@@ -82,17 +75,18 @@ public final class NickCore {
             return real;
         }
     }
+
     public String getNick(UUID id) { return nicks.get(id); }
     public List<UUID> nickedPlayers() { return new ArrayList<>(nicks.keySet()); }
 
     public String getRealName(ServerPlayerEntity p) {
         String real = realNames.get(p.getUuid());
-        return real != null ? real : p.getGameProfile().getName();
+        return real != null ? real : p.getGameProfile().name();
     }
 
     public String getDisplayName(ServerPlayerEntity p) {
         String nick = nicks.get(p.getUuid());
-        return nick != null ? nick : p.getGameProfile().getName();
+        return nick != null ? nick : p.getGameProfile().name();
     }
 
     // ---------- apply / remove ----------
@@ -146,12 +140,12 @@ public final class NickCore {
         originalTextures.clear();
     }
 
-    // ---------- profile reflection ----------
+    // ---------- skin swapping ----------
 
     private void setProfileSkin(ServerPlayerEntity player, String value, String signature) {
         try {
             GameProfile profile = player.getGameProfile();
-            PropertyMap props = profile.getProperties();
+            PropertyMap props = profile.properties();
 
             if (!originalTextures.containsKey(player.getUuid())) {
                 var existing = props.get("textures");
@@ -169,7 +163,7 @@ public final class NickCore {
     private void restoreSkin(ServerPlayerEntity player) {
         try {
             GameProfile profile = player.getGameProfile();
-            PropertyMap props = profile.getProperties();
+            PropertyMap props = profile.properties();
             props.removeAll("textures");
             Property original = originalTextures.remove(player.getUuid());
             if (original != null) props.put("textures", original);
@@ -207,7 +201,7 @@ public final class NickCore {
             // Nudge entity tracking so the destroyed entity is re-sent next tick.
             server.execute(() -> {
                 if (player.isRemoved()) return;
-                player.getServerWorld().getChunkManager().updatePosition(player);
+                ((ServerWorld) player.getEntityWorld()).getChunkManager().updatePosition(player);
             });
         } catch (Throwable t) {
             DeathBanMod.LOGGER.warn("Could not refresh nicked player for others", t);
