@@ -1,0 +1,41 @@
+package com.kephale.deathban.mixin;
+
+import com.kephale.deathban.DeathBanMod;
+import com.mojang.authlib.GameProfile;
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
+import net.minecraft.server.network.ServerPlayerEntity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
+
+/**
+ * Makes /nick actually change the username.
+ *
+ * <p>The old approach rewrote the live {@link GameProfile} by reflection. That
+ * stopped working in 1.21.2, where GameProfile became a Java record: record
+ * fields cannot be reassigned reflectively at all, so the write threw, the
+ * catch swallowed it, and only the skin ever changed.
+ *
+ * <p>This does it the way that survives. The live profile is left alone, and a
+ * substitute is handed over only at the point where the player list is built
+ * for other clients. Records are trivially constructible, just not mutable.
+ * Everything that needs the real identity, saving, permissions, bans, still
+ * sees the untouched original.
+ *
+ * <p><b>If the server fails to start with a mixin apply error naming this
+ * class, delete its line from deathban.mixins.json.</b> The mod then runs
+ * exactly as before with skin-only nicks, and nothing else is affected.
+ */
+@Mixin(PlayerListS2CPacket.Entry.class)
+public class PlayerListS2CPacketMixin {
+
+    @Redirect(
+            method = "<init>(Lnet/minecraft/server/network/ServerPlayerEntity;)V",
+            at = @At(value = "INVOKE",
+                     target = "Lnet/minecraft/server/network/ServerPlayerEntity;getGameProfile()Lcom/mojang/authlib/GameProfile;"))
+    private GameProfile deathban$substituteNickedProfile(ServerPlayerEntity player) {
+        GameProfile real = player.getGameProfile();
+        if (DeathBanMod.INSTANCE == null || DeathBanMod.INSTANCE.nickCore == null) return real;
+        return DeathBanMod.INSTANCE.nickCore.profileFor(player, real);
+    }
+}
