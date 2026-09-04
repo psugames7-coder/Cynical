@@ -89,26 +89,16 @@ public class DeathBanMod implements ModInitializer {
 
     private long now() { return System.currentTimeMillis(); }
 
-    /**
-     * Vanilla's death messages are silenced only while we are writing our own.
-     * Must be re-applied on toggle and reload, or turning custom messages off
-     * leaves showDeathMessages false and no death message prints at all.
-     */
     public void syncDeathMessageGameRule() {
         if (server == null) return;
-        // 1.21.11 reworked GameRules into a registry and SHOW_DEATH_MESSAGES has
-        // no mapped name yet, so this goes through the command dispatcher. The
-        // command syntax has been stable for years; the Java API has not.
         String v = config.ownDeathMessages ? "false" : "true";
         try {
-            server.getCommandManager().executeWithPrefix(
+            server.getCommandManager().parseAndExecute(
                     server.getCommandSource().withSilent(), "gamerule showDeathMessages " + v);
         } catch (Throwable t) {
             LOGGER.warn("Could not set showDeathMessages", t);
         }
     }
-
-
 
     // ---------- fake nick ----------
 
@@ -125,7 +115,6 @@ public class DeathBanMod implements ModInitializer {
         boolean pvp = killer != null && killer != victim;
         UUID id = victim.getUuid();
 
-        // Fake-nick personas write to the NICK's record, never the real player's.
         String nick = fakeNick.get(id);
         if (nick != null) {
             UUID nickId = resolveNickId(nick);
@@ -134,17 +123,12 @@ public class DeathBanMod implements ModInitializer {
             ne.deaths += 1;
             ne.lastDeath = now();
             store.save();
-            // Spec 1.2: red count line first, then the death message.
             announceDeath(nick, ne.deaths);
             if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
             kickLater(victim, banMessage(ne.deaths));
             return;
         }
 
-        // A plain /nick with no persona curve attached: the death counts for
-        // nobody and drops no head. Without this the death landed on the REAL
-        // player's record while the broadcast showed the nick, so the number on
-        // screen belonged to one account and the ban to another.
         if (nickCore != null && nickCore.isNicked(id)) {
             if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
             return;
@@ -164,38 +148,26 @@ public class DeathBanMod implements ModInitializer {
 
         boolean op = server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(victim.getGameProfile()));
 
-        // Exactly one head, ever. An op never really reaches the permanent
-        // count, so they must not drop the permanent skinned head either.
         if (!op && e.deaths >= config.maxDeaths) {
             dropHead(victim, e.tokenRevived);
         } else if (ThreadLocalRandom.current().nextDouble() < config.steveHeadChance) {
-            victim.dropStack(victim.getServerWorld(), new ItemStack(Items.PLAYER_HEAD));
+            victim.dropStack(((ServerWorld) victim.getEntityWorld()), new ItemStack(Items.PLAYER_HEAD));
         }
 
-        // Spec 1.2: red count line first, then the death message.
         announceDeath(displayNameOf(victim), e.deaths);
         if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
 
         kickLater(victim, banMessage(e.deaths));
         if (op) {
-            // Ops are announced and kicked, then rolled back so they rejoin on
-            // the same total and are never actually banned.
             e.deaths = Math.max(0, e.deaths - 1);
             e.lastDeath = 0;
             store.save();
         }
     }
 
-    /**
-     * The red count line is ours. The message under it is VANILLA'S OWN TEXT,
-     * pulled straight from the damage source, so every cause keeps its real
-     * wording: shot by, fireballed by, blown up by, fell from a high place.
-     * The only time we write our own is an invisible killer, where the name is
-     * scrambled and the weapon is never shown.
-     */
     private void sendDeathMessage(ServerPlayerEntity victim, ServerPlayerEntity killer, DamageSource source) {
         String victimName = displayNameOf(victim);
-        String victimReal = victim.getGameProfile().getName();
+        String victimReal = victim.getGameProfile().name();
 
         if (killer != null && killer != victim
                 && config.hideInvisibleKillers && isInvisible(killer)) {
@@ -210,11 +182,9 @@ public class DeathBanMod implements ModInitializer {
         } catch (Throwable t) {
             text = victimName + " died";
         }
-        // Substitute nicks in after the fact; vanilla built the line from the
-        // real profile names.
         if (!victimName.equals(victimReal)) text = text.replace(victimReal, victimName);
         if (killer != null) {
-            String kReal = killer.getGameProfile().getName();
+            String kReal = killer.getGameProfile().name();
             String kShown = displayNameOf(killer);
             if (!kShown.equals(kReal)) text = text.replace(kReal, kShown);
         }
@@ -228,35 +198,27 @@ public class DeathBanMod implements ModInitializer {
 
     private void dropHead(ServerPlayerEntity victim, boolean wasTokenRevived) {
         ItemStack head = new ItemStack(Items.PLAYER_HEAD);
-        // The profile component makes it render as that player's skin.
         head.set(net.minecraft.component.DataComponentTypes.PROFILE,
                 net.minecraft.component.type.ProfileComponent.ofStatic(victim.getGameProfile()));
         if (wasTokenRevived) {
             head.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
-                    Text.literal(victim.getGameProfile().getName()).formatted(Formatting.RED));
+                    Text.literal(victim.getGameProfile().name()).formatted(Formatting.RED));
         }
-        victim.dropStack(victim.getServerWorld(), head);
+        victim.dropStack(((ServerWorld) victim.getEntityWorld()), head);
     }
 
     public String displayNameOf(ServerPlayerEntity p) {
         if (nickCore != null && nickCore.isNicked(p.getUuid())) return nickCore.getNick(p.getUuid());
         String nick = fakeNick.get(p.getUuid());
-        return nick != null ? nick : p.getGameProfile().getName();
+        return nick != null ? nick : p.getGameProfile().name();
     }
 
     /** The player's true name even while nicked - never store a nick as a name. */
     public String realNameOf(ServerPlayerEntity p) {
         if (nickCore != null && nickCore.isNicked(p.getUuid())) return nickCore.getRealName(p);
-        return p.getGameProfile().getName();
+        return p.getGameProfile().name();
     }
 
-    /**
-     * The record a persona's deaths belong to. An existing record wins, then the
-     * real account if the server has ever seen it, and only then a stable hashed
-     * id for a name that belongs to nobody. Skipping the middle step meant a
-     * persona based on a real player who happened to be on zero deaths got a
-     * second, separate record that never merged back.
-     */
     public UUID resolveNickId(String nick) {
         UUID existing = store.findByName(nick);
         if (existing != null) return existing;
@@ -307,7 +269,7 @@ public class DeathBanMod implements ModInitializer {
         if (!config.deathBanEnabled) return;
         PlayerDataStore.Entry e = store.get(player.getUuid());
         if (e == null || e.deaths <= 0) return;
-        if (server != null && server.getPlayerManager().isOperator(player.getGameProfile())) return;
+        if (server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()))) return;
 
         if (e.deaths >= config.maxDeaths) {
             player.networkHandler.disconnect(Text.literal(banMessage(e.deaths)));
