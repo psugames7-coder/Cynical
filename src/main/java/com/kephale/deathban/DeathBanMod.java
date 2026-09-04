@@ -1,5 +1,6 @@
 package com.kephale.deathban;
 
+import net.minecraft.server.world.ServerWorld;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
