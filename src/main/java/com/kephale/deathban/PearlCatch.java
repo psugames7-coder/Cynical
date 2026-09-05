@@ -34,8 +34,8 @@ public final class PearlCatch {
 
     public void register() {
         ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (entity instanceof EnderPearlEntity p) pearls.add(p);
-            else if (entity instanceof WindChargeEntity c) charges.add(c);
+            if (entity instanceof EnderPearlEntity p) { if (!pearls.contains(p)) pearls.add(p); }
+            else if (entity instanceof WindChargeEntity c) { if (!charges.contains(c)) charges.add(c); }
         });
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
             if (entity instanceof EnderPearlEntity p) pearls.remove(p);
@@ -45,7 +45,6 @@ public final class PearlCatch {
         ServerTickEvents.END_SERVER_TICK.register(this::tickPending);
     }
 
-    // Sound constants are not mapped on 1.21.11, so look them up by id.
     private SoundEvent sound(String id) {
         return Registries.SOUND_EVENT.get(Identifier.ofVanilla(id));
     }
@@ -81,23 +80,21 @@ public final class PearlCatch {
                 Vec3d cp = charge.getEntityPos();
                 Vec3d cv = charge.getVelocity();
 
-                Vec3d rel = pv.subtract(cv);
-                double reach = radius + rel.length();
-                if (pp.squaredDistanceTo(cp) > reach * reach) continue;
+                // Exact closest approach over this tick. Sampling fixed points
+                // let fast projectiles slip between samples and miss entirely.
+                Vec3d rp = pp.subtract(cp);
+                Vec3d rv = pv.subtract(cv);
+                double vv = rv.lengthSquared();
+                double t = vv < 1.0E-9 ? 0.0 : -rp.dotProduct(rv) / vv;
+                if (t < 0.0) t = 0.0;
+                if (t > 1.0) t = 1.0;
 
-                double bestSq = Double.MAX_VALUE;
-                double bestT = 0.0;
-                for (int i = 1; i <= 4; i++) {
-                    double t = i / 4.0;
-                    double dx = (pp.x + pv.x * t) - (cp.x + cv.x * t);
-                    double dy = (pp.y + pv.y * t) - (cp.y + cv.y * t);
-                    double dz = (pp.z + pv.z * t) - (cp.z + cv.z * t);
-                    double sq = dx * dx + dy * dy + dz * dz;
-                    if (sq < bestSq) { bestSq = sq; bestT = t; }
-                }
-                if (bestSq > radiusSq) continue;
+                double dx = rp.x + rv.x * t;
+                double dy = rp.y + rv.y * t;
+                double dz = rp.z + rv.z * t;
+                if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
 
-                doCatch(world, pearl, charge, thrower, bestT);
+                doCatch(world, pearl, charge, thrower, t);
                 return;
             }
         }
