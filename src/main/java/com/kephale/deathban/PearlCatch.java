@@ -6,11 +6,13 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.entity.projectile.WindChargeEntity;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvents;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
@@ -25,6 +27,9 @@ public final class PearlCatch {
 
     private final List<DelayedTeleport> pending = new ArrayList<>();
 
+    private SoundEvent windBurst;
+    private SoundEvent pearlLand;
+
     public PearlCatch(DeathBanMod mod) { this.mod = mod; }
 
     public void register() {
@@ -38,6 +43,11 @@ public final class PearlCatch {
         });
         ServerTickEvents.END_WORLD_TICK.register(this::tickWorld);
         ServerTickEvents.END_SERVER_TICK.register(this::tickPending);
+    }
+
+    // Sound constants are not mapped on 1.21.11, so look them up by id.
+    private SoundEvent sound(String id) {
+        return Registries.SOUND_EVENT.get(Identifier.ofVanilla(id));
     }
 
     private void prune() {
@@ -103,10 +113,14 @@ public final class PearlCatch {
         double mz = ((pp.z + pv.z * t) + (cp.z + cv.z * t)) / 2.0;
 
         if (mod.config.pearlPlaySound) {
-            world.playSound(null, mx, my, mz, SoundEvents.ENTITY_WIND_CHARGE_WIND_BURST,
-                    SoundCategory.PLAYERS, 1.0f, 1.0f);
-            world.playSound(null, mx, my, mz, SoundEvents.ENTITY_ENDERMAN_TELEPORT,
-                    SoundCategory.PLAYERS, 1.0f, 1.0f);
+            if (windBurst == null) windBurst = sound("entity.wind_charge.wind_burst");
+            if (pearlLand == null) pearlLand = sound("entity.enderman.teleport");
+            if (windBurst != null) {
+                world.playSound(null, mx, my, mz, windBurst, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            }
+            if (pearlLand != null) {
+                world.playSound(null, mx, my, mz, pearlLand, SoundCategory.PLAYERS, 1.0f, 1.0f);
+            }
         }
 
         pearl.discard();
