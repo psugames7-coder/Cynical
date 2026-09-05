@@ -13,7 +13,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -21,25 +20,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Nicknames with a real name and skin change, the same behaviour the Bukkit
- * plugin had.
- *
- * <p>The live GameProfile is never mutated. It became a Java record in 1.21.2
- * and record fields cannot be reassigned reflectively at all, which is why the
- * old approach silently only ever changed the skin. Instead profileFor builds a
- * substitute and PlayerListS2CPacketMixin hands it to other clients at send
- * time.
- */
 public final class NickCore {
 
     private final DeathBanMod mod;
 
     private final Map<UUID, String> nicks = new HashMap<>();
     private final Map<UUID, String> realNames = new HashMap<>();
-    /** Saved textures so the original skin can be put back exactly. */
     private final Map<UUID, Property> originalTextures = new HashMap<>();
-    // Written from the fetch thread, read from the server thread.
     private final Map<String, String[]> skinCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, Long> skinCacheTime = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -47,14 +34,8 @@ public final class NickCore {
 
     public NickCore(DeathBanMod mod) { this.mod = mod; }
 
-    // ---------- state ----------
-
     public boolean isNicked(UUID id) { return nicks.containsKey(id); }
 
-    /**
-     * The profile other clients should see. A fresh GameProfile carrying the
-     * nick and its skin, built on demand, never a mutation of the live one.
-     */
     public GameProfile profileFor(ServerPlayerEntity player, GameProfile real) {
         UUID id = player.getUuid();
         String nick = nicks.get(id);
@@ -89,15 +70,10 @@ public final class NickCore {
         return nick != null ? nick : p.getGameProfile().name();
     }
 
-    // ---------- apply / remove ----------
-
     public void nick(ServerPlayerEntity player, String nick) {
         UUID id = player.getUuid();
         realNames.put(id, getRealName(player));
         nicks.put(id, nick);
-
-        // No reflection. PlayerListS2CPacketMixin substitutes the profile on
-        // the way out; refresh() makes every client re-request it.
         refresh(player);
 
         fetchSkinAsync(nick, (value, signature) -> {
@@ -105,7 +81,7 @@ public final class NickCore {
             if (server == null) return;
             server.execute(() -> {
                 if (player.isRemoved()) return;
-                if (!nick.equals(nicks.get(id))) return; // changed meanwhile
+                if (!nick.equals(nicks.get(id))) return;
                 if (value == null) {
                     DeathBanMod.LOGGER.info("No skin found for '{}' - name applied without it.", nick);
                     return;
@@ -140,8 +116,6 @@ public final class NickCore {
         originalTextures.clear();
     }
 
-    // ---------- skin swapping ----------
-
     private void setProfileSkin(ServerPlayerEntity player, String value, String signature) {
         try {
             GameProfile profile = player.getGameProfile();
@@ -172,13 +146,6 @@ public final class NickCore {
         }
     }
 
-    // ---------- refresh ----------
-
-    /**
-     * Make everyone else re-read the profile. Removing the player from the tab
-     * list and re-adding them resends the profile; destroying and respawning the
-     * entity makes the skin re-render.
-     */
     private void refresh(ServerPlayerEntity player) {
         MinecraftServer server = mod.server();
         if (server == null) return;
@@ -194,11 +161,8 @@ public final class NickCore {
                 other.networkHandler.sendPacket(remove);
                 other.networkHandler.sendPacket(add);
                 if (other.getUuid().equals(player.getUuid())) continue;
-                // Drop the entity so the client rebuilds it with the new skin.
                 other.networkHandler.sendPacket(destroy);
             }
-
-            // Nudge entity tracking so the destroyed entity is re-sent next tick.
             server.execute(() -> {
                 if (player.isRemoved()) return;
                 ((ServerWorld) player.getEntityWorld()).getChunkManager().updatePosition(player);
@@ -207,8 +171,6 @@ public final class NickCore {
             DeathBanMod.LOGGER.warn("Could not refresh nicked player for others", t);
         }
     }
-
-    // ---------- skin fetching ----------
 
     public interface SkinCallback { void done(String value, String signature); }
 
@@ -257,7 +219,7 @@ public final class NickCore {
     private String httpGet(String url) {
         HttpURLConnection conn = null;
         try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn = (HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
             conn.setConnectTimeout(5000);
             conn.setReadTimeout(5000);
             conn.setRequestProperty("Accept", "application/json");
@@ -276,7 +238,6 @@ public final class NickCore {
         }
     }
 
-    /** Minimal field extraction - avoids depending on a JSON library here. */
     private String extract(String json, String field) {
         String needle = "\"" + field + "\"";
         int i = json.indexOf(needle);
