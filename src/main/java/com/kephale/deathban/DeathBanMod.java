@@ -111,7 +111,7 @@ public class DeathBanMod implements ModInitializer {
             UUID nickId = resolveNickId(nick);
             PlayerDataStore.Entry ne = store.getOrCreate(nickId, nick);
             if (ne.name == null || ne.name.isEmpty()) ne.name = nick;
-            ne.deaths += 1;
+            ne.deaths = Math.min(config.maxDeaths, ne.deaths + 1);
             ne.lastDeath = now();
             store.save();
             announceDeath(nick, ne.deaths);
@@ -132,7 +132,7 @@ public class DeathBanMod implements ModInitializer {
         String realName = realNameOf(victim);
         PlayerDataStore.Entry e = store.getOrCreate(id, realName);
         if (realName != null && !realName.isEmpty()) e.name = realName;
-        e.deaths += 1;
+        e.deaths = Math.min(config.maxDeaths, e.deaths + 1);
         e.lastDeath = now();
         store.save();
 
