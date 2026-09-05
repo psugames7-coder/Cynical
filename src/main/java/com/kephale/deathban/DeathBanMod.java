@@ -38,8 +38,6 @@ public class DeathBanMod implements ModInitializer {
     private PearlCatch pearlCatch;
     public NickCore nickCore;
     public Revive revive;
-
-    /** Player -> the nick they are impersonating for a fake death curve. */
     private final Map<UUID, String> fakeNick = new HashMap<>();
 
     @Override
@@ -77,8 +75,6 @@ public class DeathBanMod implements ModInitializer {
 
     public MinecraftServer server() { return server; }
 
-    // ---------- helpers ----------
-
     public void broadcast(Text text) {
         if (server == null) return;
         for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
@@ -100,13 +96,9 @@ public class DeathBanMod implements ModInitializer {
         }
     }
 
-    // ---------- fake nick ----------
-
     public void setFakeNick(UUID player, String nick) { fakeNick.put(player, nick); }
     public void clearFakeNick(UUID player) { fakeNick.remove(player); }
     public String fakeNickOf(UUID player) { return fakeNick.get(player); }
-
-    // ---------- death ----------
 
     private void onPlayerDeath(ServerPlayerEntity victim, DamageSource source) {
         ServerPlayerEntity killer = null;
@@ -114,7 +106,6 @@ public class DeathBanMod implements ModInitializer {
 
         boolean pvp = killer != null && killer != victim;
         UUID id = victim.getUuid();
-
         String nick = fakeNick.get(id);
         if (nick != null) {
             UUID nickId = resolveNickId(nick);
@@ -128,7 +119,6 @@ public class DeathBanMod implements ModInitializer {
             kickLater(victim, banMessage(ne.deaths));
             return;
         }
-
         if (nickCore != null && nickCore.isNicked(id)) {
             if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
             return;
@@ -147,13 +137,11 @@ public class DeathBanMod implements ModInitializer {
         store.save();
 
         boolean op = server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(victim.getGameProfile()));
-
         if (!op && e.deaths >= config.maxDeaths) {
             dropHead(victim, e.tokenRevived);
         } else if (ThreadLocalRandom.current().nextDouble() < config.steveHeadChance) {
             victim.dropStack(((ServerWorld) victim.getEntityWorld()), new ItemStack(Items.PLAYER_HEAD));
         }
-
         announceDeath(displayNameOf(victim), e.deaths);
         if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
 
@@ -213,7 +201,6 @@ public class DeathBanMod implements ModInitializer {
         return nick != null ? nick : p.getGameProfile().name();
     }
 
-    /** The player's true name even while nicked - never store a nick as a name. */
     public String realNameOf(ServerPlayerEntity p) {
         if (nickCore != null && nickCore.isNicked(p.getUuid())) return nickCore.getRealName(p);
         return p.getGameProfile().name();
@@ -263,8 +250,6 @@ public class DeathBanMod implements ModInitializer {
         return sb.toString().trim();
     }
 
-    // ---------- join / quit ----------
-
     private void onJoin(ServerPlayerEntity player) {
         if (!config.deathBanEnabled) return;
         PlayerDataStore.Entry e = store.get(player.getUuid());
@@ -287,7 +272,6 @@ public class DeathBanMod implements ModInitializer {
         if (nickCore != null && nickCore.isNicked(player.getUuid())) nickCore.unnick(player);
     }
 
-    /** Invisible killers are stripped from death messages. */
     public boolean isInvisible(ServerPlayerEntity p) {
         return p != null && (p.isInvisible() || p.hasStatusEffect(StatusEffects.INVISIBILITY));
     }
