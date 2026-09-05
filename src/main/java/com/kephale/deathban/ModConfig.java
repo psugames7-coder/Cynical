@@ -8,30 +8,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/**
- * Every toggle in one place, saved to {@code config/deathban/config.json}.
- * Changed at runtime by the commands and written straight back out, so nothing
- * needs a restart.
- */
 public final class ModConfig {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    // ---- death ban ----
     public boolean deathBanEnabled = true;
     public int maxDeaths = 5;
     public int reviveDeaths = 3;
     public double steveHeadChance = 0.30;
     public boolean hideInvisibleKillers = true;
-    /** Mod writes its own death messages and silences vanilla's. */
     public boolean ownDeathMessages = true;
-    /** Carpet bots join and leave silently. Real players still announce. */
     public boolean hideBotConnectionMessages = true;
 
-    // ---- pearl catch ----
     public boolean pearlCatchEnabled = true;
-    public double pearlCollisionRadius = 1.4;
-    /** Any wind charge catches any pearl, not just your own. */
+    public double pearlCollisionRadius = 2.5;
     public boolean pearlSameThrowerOnly = false;
     public double pearlPassthroughNudge = 2.0;
     public int pearlDelayMaxTicks = 8;
