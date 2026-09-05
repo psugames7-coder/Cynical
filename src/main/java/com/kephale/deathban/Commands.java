@@ -22,7 +22,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
 
-/** All commands. Op level 2 required throughout. */
 public final class Commands {
 
     private Commands() {}
@@ -80,8 +79,6 @@ public final class Commands {
                                     .executes(ctx -> revertNick(ctx, mod))))
 
                     .then(literal("item").executes(ctx -> giveToken(ctx, mod)))
-
-                    // ---- data transfer ----
                     .then(literal("export").executes(ctx -> export(ctx, mod)))
                     .then(literal("import")
                             .then(argument("file", StringArgumentType.string())
@@ -145,7 +142,6 @@ public final class Commands {
                                     })))
             );
 
-            // ---------------- nick ----------------
             dispatcher.register(literal("nick")
                     .requires(Commands::isAdmin)
                     .then(argument("player", EntityArgumentType.player())
@@ -196,7 +192,6 @@ public final class Commands {
                                 return 0;
                             })));
 
-            // ---------------- pearl catch tuning ----------------
             dispatcher.register(literal("pearlcatch")
                     .requires(Commands::isAdmin)
                     .executes(ctx -> {
@@ -245,8 +240,6 @@ public final class Commands {
                             }))));
         });
     }
-
-    // ---------- implementations ----------
 
     private static int help(ServerCommandSource src) {
         String[] lines = {
@@ -349,11 +342,13 @@ public final class Commands {
 
     private static int setDeaths(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
         String name = StringArgumentType.getString(ctx, "name");
-        int count = IntegerArgumentType.getInteger(ctx, "count");
+        int count = Math.max(0, Math.min(mod.config.maxDeaths,
+                IntegerArgumentType.getInteger(ctx, "count")));
         UUID id = mod.store.findByName(name);
         if (id == null) id = PlayerDataStore.offlineIdFor(name);
         PlayerDataStore.Entry e = mod.store.getOrCreate(id, name);
         e.deaths = count;
+        e.lastDeath = count > 0 ? System.currentTimeMillis() : 0;
         mod.store.save();
         msg(ctx, "§aSet §f" + name + "§a to " + count + " deaths.");
         return 1;
@@ -380,7 +375,6 @@ public final class Commands {
         }
         String realName = mod.realNameOf(target);
         mod.setFakeNick(target.getUuid(), nick);
-        // One command is the whole persona: name, skin, and the death curve.
         if (!mod.nickCore.isNicked(target.getUuid())) mod.nickCore.nick(target, nick);
         msg(ctx, "§aFake-nick ON for §f" + realName + "§a as §f" + nick
                 + "§a - on " + start + " deaths" + (seeded ? " (new, randomised)" : " (from history)") + ".");
@@ -391,7 +385,6 @@ public final class Commands {
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
         mod.clearFakeNick(target.getUuid());
-        // Spec 1.6: revertnick ends fake mode AND un-nicks.
         if (mod.nickCore.isNicked(target.getUuid())) mod.nickCore.unnick(target);
         msg(ctx, "§eFake-nick OFF for §f" + mod.realNameOf(target));
         return 1;
@@ -439,23 +432,17 @@ public final class Commands {
         }
     }
 
-    // ---------- utils ----------
-
     private static String onOff(boolean b) { return b ? "§aON" : "§cOFF"; }
 
-    /**
-     * 1.21.11 removed ServerCommandSource.hasPermissionLevel and replaced it with
-     * a whole permission-predicate system that is barely mapped yet. This asks the
-     * one question we actually care about, using only stable calls: is this an op?
-     * Console and command blocks pass.
-     */
     private static boolean isAdmin(ServerCommandSource src) {
         ServerPlayerEntity p = src.getPlayer();
         if (p == null) return true;
         MinecraftServer s = p.getEntityWorld().getServer();
-        if (s == null) return false;
-        return s.getPlayerManager().isOperator(
-                new net.minecraft.server.PlayerConfigEntry(p.getGameProfile()));
+        if (s == null) return true;
+        if (s.isSingleplayer()) return true;
+        net.minecraft.server.PlayerConfigEntry entry =
+                new net.minecraft.server.PlayerConfigEntry(p.getGameProfile());
+        return s.isHost(entry) || s.getPlayerManager().isOperator(entry);
     }
 
     private static void msg(CommandContext<ServerCommandSource> ctx, String text) {
