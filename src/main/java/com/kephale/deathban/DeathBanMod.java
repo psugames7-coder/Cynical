@@ -26,6 +26,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
+    public static final String VERSION = "1.2.1";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
@@ -55,7 +56,9 @@ public class DeathBanMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
             this.server = s;
             syncDeathMessageGameRule();
-            LOGGER.info("DeathBan ready - {} player records loaded.", store.all().size());
+            int fixed = normaliseCounts();
+            LOGGER.info("=== DeathBan {} ready - {} records, {} corrected ===",
+                    VERSION, store.all().size(), fixed);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> { nickCore.restoreAll(); store.save(); });
 
@@ -74,6 +77,20 @@ public class DeathBanMod implements ModInitializer {
     }
 
     public MinecraftServer server() { return server; }
+
+    public int pearlCatchTrackedPearls() { return pearlCatch == null ? -1 : pearlCatch.trackedPearls(); }
+    public int pearlCatchTrackedCharges() { return pearlCatch == null ? -1 : pearlCatch.trackedCharges(); }
+    public int pearlCatchCount() { return pearlCatch == null ? -1 : pearlCatch.catches(); }
+
+    public int normaliseCounts() {
+        int fixed = 0;
+        for (PlayerDataStore.Entry e : store.all().values()) {
+            if (e.deaths > config.maxDeaths) { e.deaths = 4; e.lastDeath = now(); fixed++; }
+            if (e.deaths < 0) { e.deaths = 0; fixed++; }
+        }
+        if (fixed > 0) store.save();
+        return fixed;
+    }
 
     public void broadcast(Text text) {
         if (server == null) return;
@@ -254,6 +271,7 @@ public class DeathBanMod implements ModInitializer {
         if (!config.deathBanEnabled) return;
         PlayerDataStore.Entry e = store.get(player.getUuid());
         if (e == null || e.deaths <= 0) return;
+        if (e.deaths > config.maxDeaths) { e.deaths = 4; e.lastDeath = now(); store.save(); }
         if (server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()))) return;
 
         if (e.deaths >= config.maxDeaths) {
