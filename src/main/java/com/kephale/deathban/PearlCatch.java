@@ -32,10 +32,22 @@ public final class PearlCatch {
 
     public PearlCatch(DeathBanMod mod) { this.mod = mod; }
 
+    public int trackedPearls() { return pearls.size(); }
+    public int trackedCharges() { return charges.size(); }
+    public int catches() { return catches; }
+    private int catches = 0;
+
     public void register() {
         ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (entity instanceof EnderPearlEntity p) { if (!pearls.contains(p)) pearls.add(p); }
-            else if (entity instanceof WindChargeEntity c) { if (!charges.contains(c)) charges.add(c); }
+            if (entity instanceof EnderPearlEntity p) {
+                if (!pearls.contains(p)) pearls.add(p);
+                DeathBanMod.LOGGER.info("PearlCatch: pearl spawned, tracking {} pearls / {} charges",
+                        pearls.size(), charges.size());
+            } else if (entity instanceof WindChargeEntity c) {
+                if (!charges.contains(c)) charges.add(c);
+                DeathBanMod.LOGGER.info("PearlCatch: charge spawned, tracking {} pearls / {} charges",
+                        pearls.size(), charges.size());
+            }
         });
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
             if (entity instanceof EnderPearlEntity p) pearls.remove(p);
@@ -61,16 +73,15 @@ public final class PearlCatch {
         if (pearls.isEmpty() || charges.isEmpty()) return;
 
         double radius = mod.config.pearlCollisionRadius;
-        double radiusSq = radius * radius;
 
-        for (EnderPearlEntity pearl : pearls) {
+        for (EnderPearlEntity pearl : new ArrayList<>(pearls)) {
             if (pearl.isRemoved() || pearl.getEntityWorld() != world) continue;
             if (!(pearl.getOwner() instanceof ServerPlayerEntity thrower)) continue;
 
             Vec3d pp = pearl.getEntityPos();
             Vec3d pv = pearl.getVelocity();
 
-            for (WindChargeEntity charge : charges) {
+            for (WindChargeEntity charge : new ArrayList<>(charges)) {
                 if (charge.isRemoved() || charge.getEntityWorld() != world) continue;
                 if (mod.config.pearlSameThrowerOnly) {
                     if (!(charge.getOwner() instanceof ServerPlayerEntity co)) continue;
@@ -80,8 +91,6 @@ public final class PearlCatch {
                 Vec3d cp = charge.getEntityPos();
                 Vec3d cv = charge.getVelocity();
 
-                // Exact closest approach over this tick. Sampling fixed points
-                // let fast projectiles slip between samples and miss entirely.
                 Vec3d rp = pp.subtract(cp);
                 Vec3d rv = pv.subtract(cv);
                 double vv = rv.lengthSquared();
@@ -92,8 +101,19 @@ public final class PearlCatch {
                 double dx = rp.x + rv.x * t;
                 double dy = rp.y + rv.y * t;
                 double dz = rp.z + rv.z * t;
-                if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
 
+                double gap = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                if (gap > radius) {
+                    if (gap < radius * 4) {
+                        DeathBanMod.LOGGER.info("PearlCatch: near miss, closest {} blocks (radius {})",
+                                String.format("%.2f", gap), radius);
+                    }
+                    continue;
+                }
+
+                catches++;
+                DeathBanMod.LOGGER.info("PearlCatch: CAUGHT at {} blocks for {}",
+                        String.format("%.2f", gap), thrower.getGameProfile().name());
                 doCatch(world, pearl, charge, thrower, t);
                 return;
             }
