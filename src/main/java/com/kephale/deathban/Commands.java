@@ -33,29 +33,23 @@ public final class Commands {
                     .requires(Commands::isAdmin)
                     .executes(ctx -> help(ctx.getSource()))
                     .then(literal("help").executes(ctx -> help(ctx.getSource())))
-
                     .then(literal("check")
                             .executes(ctx -> checkAll(ctx, mod))
                             .then(argument("name", StringArgumentType.word())
                                     .executes(ctx -> checkOne(ctx, mod))))
-
                     .then(literal("revive")
                             .then(argument("name", StringArgumentType.word())
                                     .executes(ctx -> revive(ctx, mod))))
-
                     .then(literal("pardon")
                             .then(argument("name", StringArgumentType.word())
                                     .executes(ctx -> pardon(ctx, mod))))
-
                     .then(literal("revert")
                             .then(argument("name", StringArgumentType.word())
                                     .executes(ctx -> revert(ctx, mod))))
-
                     .then(literal("set")
                             .then(argument("name", StringArgumentType.word())
                                     .then(argument("count", IntegerArgumentType.integer(0))
                                             .executes(ctx -> setDeaths(ctx, mod)))))
-
                     .then(literal("revivedeaths")
                             .executes(ctx -> {
                                 msg(ctx, "Token revives bring players back on " + mod.config.reviveDeaths + " deaths.");
@@ -68,16 +62,13 @@ public final class Commands {
                                         msg(ctx, "Token revives now bring players back on " + mod.config.reviveDeaths + " deaths.");
                                         return 1;
                                     })))
-
                     .then(literal("fakenick")
                             .then(argument("player", EntityArgumentType.player())
                                     .then(argument("nick", StringArgumentType.word())
                                             .executes(ctx -> fakeNick(ctx, mod)))))
-
                     .then(literal("revertnick")
                             .then(argument("player", EntityArgumentType.player())
                                     .executes(ctx -> revertNick(ctx, mod))))
-
                     .then(literal("item").executes(ctx -> giveToken(ctx, mod)))
                     .then(literal("debug").executes(ctx -> debug(ctx, mod)))
                     .then(literal("export").executes(ctx -> export(ctx, mod)))
@@ -94,7 +85,6 @@ public final class Commands {
                         msg(ctx, "Config and player data reloaded.");
                         return 1;
                     }))
-
                     .then(literal("toggle")
                             .then(literal("deathban").then(argument("on", BoolArgumentType.bool())
                                     .executes(ctx -> {
@@ -132,7 +122,6 @@ public final class Commands {
                                         msg(ctx, "PearlCatch " + onOff(mod.config.pearlCatchEnabled));
                                         return 1;
                                     }))))
-
                     .then(literal("headchance")
                             .then(argument("chance", DoubleArgumentType.doubleArg(0.0, 1.0))
                                     .executes(ctx -> {
@@ -241,8 +230,7 @@ public final class Commands {
                             }))));
         });
     }
-
-    private static int help(ServerCommandSource src) {
+        private static int help(ServerCommandSource src) {
         String[] lines = {
                 "§6=== DeathBan ===",
                 "§71. §e/deathban check [player] §7- death counts",
@@ -254,17 +242,233 @@ public final class Commands {
                 "§77. §e/deathban headchance <0-1> §7- head drop chance",
                 "§78. §e/deathban item §7- give yourself a Revive Token",
                 "§79. §e/deathban debug §7- version and live state",
-                "§710. §e/deathban toggle <deathban|invisiblekillers|deathmessages|botmessages|pearlcatch> <true|false>",
+                "§710. §e/deathban toggle <feature> <true|false>",
                 "§6=== Nick ===",
                 "§711. §e/nick <player> <nick> §7- change name and skin",
                 "§712. §e/unnick <player> §7| §eall §7- remove nick(s)",
                 "§713. §e/realname <nick> §7- who is behind a nick",
-                "§714. §e/deathban fakenick <player> <nick> §7- fake death curve on a nick",
-                "§715. §e/deathban revertnick <player> §7- end fake mode and un-nick",
+                "§714. §e/deathban fakenick <player> <nick> §7- fake death curve",
+                "§715. §e/deathban revertnick <player> §7- end fake mode",
                 "§6=== Data ===",
-                "§716. §e/deathban export §7- write a timestamped JSON copy",
-                "§717. §e/deathban import <file> [overwrite] §7- load players.yml or .json",
+                "§716. §e/deathban export §7- timestamped JSON copy",
+                "§717. §e/deathban import <file> [overwrite]",
                 "§718. §e/deathban reload §7- re-read config and data",
                 "§6=== PearlCatch ===",
                 "§719. §e/pearlcatch §7- current settings",
-                "§720. §e/pearlcatch on|off §7- enable or disable",
+                "§720. §e/pearlcatch on|off",
+                "§721. §e/pearlcatch radius <v>",
+                "§722. §e/pearlcatch delay <min> <max>",
+                "§723. §e/pearlcatch momentum <v>",
+                "§724. §e/pearlcatch sound <true|false>",
+                "§725. §e/deathban help §7- this list"
+        };
+        for (String l : lines) src.sendFeedback(() -> Text.literal(l), false);
+        return 1;
+    }
+
+    private static int checkAll(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        msg(ctx, "§6=== Death counts ===");
+        boolean any = false;
+        for (Map.Entry<UUID, PlayerDataStore.Entry> e : mod.store.all().entrySet()) {
+            PlayerDataStore.Entry v = e.getValue();
+            if (v.deaths <= 0) continue;
+            any = true;
+            String status = v.deaths >= mod.config.maxDeaths ? "§4PERMA" : "§e" + v.deaths + "/" + mod.config.maxDeaths;
+            msg(ctx, "§f" + v.name + "§7: " + status + (v.tokenRevived ? " §8(revive used)" : ""));
+        }
+        if (!any) msg(ctx, "§7Nobody has died yet.");
+        return 1;
+    }
+
+    private static UUID idFor(DeathBanMod mod, CommandContext<ServerCommandSource> ctx, String name) {
+        UUID id = mod.store.findByName(name);
+        if (id != null) return id;
+        MinecraftServer s = ctx.getSource().getServer();
+        if (s != null) {
+            ServerPlayerEntity online = s.getPlayerManager().getPlayer(name);
+            if (online != null) return online.getUuid();
+        }
+        return null;
+    }
+
+    private static int checkOne(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        String name = StringArgumentType.getString(ctx, "name");
+        UUID id = idFor(mod, ctx, name);
+        PlayerDataStore.Entry e = id == null ? null : mod.store.get(id);
+        if (e == null) { msg(ctx, "§7" + name + " has no record."); return 0; }
+        String status = e.deaths >= mod.config.maxDeaths ? "§4PERMANENTLY BANNED" : "§e" + e.deaths + "/" + mod.config.maxDeaths;
+        msg(ctx, "§f" + e.name + "§7: " + status + (e.tokenRevived ? " §8(revive used)" : ""));
+        return 1;
+    }
+
+    private static int revive(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        String name = StringArgumentType.getString(ctx, "name");
+        UUID id = idFor(mod, ctx, name);
+        PlayerDataStore.Entry e = id == null ? null : mod.store.get(id);
+        if (e == null) { msg(ctx, "§7Player not found."); return 0; }
+        e.deaths = 0; e.lastDeath = 0;
+        mod.store.save();
+        msg(ctx, "§aRevived §f" + e.name + "§a (reset to 0).");
+        mod.broadcast(Text.literal(e.name + " was revived!").formatted(Formatting.GREEN));
+        return 1;
+    }
+
+    private static int pardon(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        String name = StringArgumentType.getString(ctx, "name");
+        UUID id = idFor(mod, ctx, name);
+        PlayerDataStore.Entry e = id == null ? null : mod.store.get(id);
+        if (e == null) { msg(ctx, "§7Player not found."); return 0; }
+        if (e.deaths >= mod.config.maxDeaths) {
+            msg(ctx, "§c" + e.name + " is perma-banned. Use revive, revert or set.");
+            return 0;
+        }
+        e.lastDeath = 0;
+        mod.store.save();
+        msg(ctx, "§aPardoned §f" + e.name + "§a - timer cleared, still on " + e.deaths + ".");
+        return 1;
+    }
+
+    private static int revert(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        String name = StringArgumentType.getString(ctx, "name");
+        UUID id = idFor(mod, ctx, name);
+        PlayerDataStore.Entry e = id == null ? null : mod.store.get(id);
+        if (e == null) { msg(ctx, "§7Player not found."); return 0; }
+        int before = e.deaths;
+        e.deaths = Math.max(1, e.deaths - 1);
+        e.lastDeath = 0;
+        mod.store.save();
+        msg(ctx, "§aReverted §f" + e.name + "§a - " + before + " -> " + e.deaths + ".");
+        return 1;
+    }
+
+    private static int setDeaths(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        String name = StringArgumentType.getString(ctx, "name");
+        int count = Math.max(0, Math.min(mod.config.maxDeaths,
+                IntegerArgumentType.getInteger(ctx, "count")));
+        UUID id = idFor(mod, ctx, name);
+        if (id == null) id = PlayerDataStore.offlineIdFor(name);
+        PlayerDataStore.Entry e = mod.store.getOrCreate(id, name);
+        e.deaths = count;
+        e.lastDeath = count > 0 ? System.currentTimeMillis() : 0;
+        mod.store.save();
+        msg(ctx, "§aSet §f" + name + "§a to " + count + " deaths.");
+        return 1;
+    }
+
+    private static int fakeNick(CommandContext<ServerCommandSource> ctx, DeathBanMod mod)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+        String nick = StringArgumentType.getString(ctx, "nick");
+
+        UUID nickId = mod.resolveNickId(nick);
+        PlayerDataStore.Entry ne = mod.store.get(nickId);
+        int start;
+        boolean seeded = false;
+        if (ne != null && ne.deaths > 0) {
+            start = ne.deaths;
+        } else {
+            start = 1 + ThreadLocalRandom.current().nextInt(4);
+            ne = mod.store.getOrCreate(nickId, nick);
+            ne.name = nick;
+            ne.deaths = start;
+            mod.store.save();
+            seeded = true;
+        }
+        String realName = mod.realNameOf(target);
+        mod.setFakeNick(target.getUuid(), nick);
+        if (!mod.nickCore.isNicked(target.getUuid())) mod.nickCore.nick(target, nick);
+        msg(ctx, "§aFake-nick ON for §f" + realName + "§a as §f" + nick
+                + "§a - on " + start + " deaths" + (seeded ? " (new, randomised)" : " (from history)") + ".");
+        return 1;
+    }
+
+    private static int revertNick(CommandContext<ServerCommandSource> ctx, DeathBanMod mod)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+        mod.clearFakeNick(target.getUuid());
+        if (mod.nickCore.isNicked(target.getUuid())) mod.nickCore.unnick(target);
+        msg(ctx, "§eFake-nick OFF for §f" + mod.realNameOf(target));
+        return 1;
+    }
+
+    private static int giveToken(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        ServerPlayerEntity p = ctx.getSource().getPlayer();
+        if (p == null) { msg(ctx, "§cRun this in-game."); return 0; }
+        if (!p.getInventory().insertStack(mod.revive.makeToken())) {
+            p.dropItem(mod.revive.makeToken(), false);
+        }
+        msg(ctx, "§aGave you a Revive Token.");
+        return 1;
+    }
+
+    private static int export(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        try {
+            Path out = mod.store.export();
+            msg(ctx, "§aExported to §f" + out.getFileName());
+            msg(ctx, "§7Full path: " + out);
+            return 1;
+        } catch (Exception e) {
+            msg(ctx, "§cExport failed: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static int importData(CommandContext<ServerCommandSource> ctx, DeathBanMod mod, boolean overwrite) {
+        String name = StringArgumentType.getString(ctx, "file");
+        Path p = mod.configDir.resolve(name);
+        if (!Files.exists(p)) {
+            msg(ctx, "§cNot found: " + p);
+            msg(ctx, "§7Put the file in config/deathban/ first.");
+            return 0;
+        }
+        try {
+            int n = name.toLowerCase().endsWith(".yml") || name.toLowerCase().endsWith(".yaml")
+                    ? mod.store.importLegacyYaml(p, overwrite)
+                    : mod.store.importJson(p, overwrite);
+            msg(ctx, "§aImported " + n + " record(s)" + (overwrite ? " (overwriting)" : " (new only)") + ".");
+            return 1;
+        } catch (Exception e) {
+            msg(ctx, "§cImport failed: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private static String onOff(boolean b) { return b ? "§aON" : "§cOFF"; }
+
+    private static int debug(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        ServerPlayerEntity p = ctx.getSource().getPlayer();
+        msg(ctx, "§6DeathBan 1.2.1 §7| admin: " + isAdmin(ctx.getSource()));
+        msg(ctx, "§7ownDeathMessages: " + mod.config.ownDeathMessages
+                + " | hideInvisibleKillers: " + mod.config.hideInvisibleKillers);
+        msg(ctx, "§7pearlcatch: " + mod.config.pearlCatchEnabled
+                + " | radius " + mod.config.pearlCollisionRadius
+                + " | delay " + mod.config.pearlDelayMinTicks + "-" + mod.config.pearlDelayMaxTicks
+                + " | momentum " + mod.config.pearlMomentumKeep);
+        if (p != null) {
+            msg(ctx, "§7you invisible: " + mod.isInvisible(p));
+            msg(ctx, "§7your record: " + mod.store.get(p.getUuid()));
+        }
+        return 1;
+    }
+
+    private static boolean isAdmin(ServerCommandSource src) {
+        try {
+            ServerPlayerEntity p = src.getPlayer();
+            if (p == null) return true;
+            MinecraftServer s = p.getEntityWorld().getServer();
+            if (s == null || s.isSingleplayer()) return true;
+            net.minecraft.server.PlayerConfigEntry entry =
+                    new net.minecraft.server.PlayerConfigEntry(p.getGameProfile());
+            if (s.isHost(entry)) return true;
+            if (s.getPlayerManager().isOperator(entry)) return true;
+            return false;
+        } catch (Throwable t) {
+            DeathBanMod.LOGGER.warn("isAdmin check failed, allowing", t);
+            return true;
+        }
+    }
+
+    private static void msg(CommandContext<ServerCommandSource> ctx, String text) {
+        ctx.getSource().sendFeedback(() -> Text.literal(text), false);
+    }
+}
