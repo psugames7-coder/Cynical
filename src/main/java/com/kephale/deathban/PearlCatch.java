@@ -5,18 +5,15 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.entity.projectile.WindChargeEntity;
-import net.minecraft.network.packet.s2c.play.PositionFlag;
-import net.minecraft.registry.Registries;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public final class PearlCatch {
 
@@ -25,175 +22,89 @@ public final class PearlCatch {
     private final List<EnderPearlEntity> pearls = new ArrayList<>();
     private final List<WindChargeEntity> charges = new ArrayList<>();
 
-    private final List<DelayedTeleport> pending = new ArrayList<>();
-
-    private SoundEvent windBurst;
-    private SoundEvent pearlLand;
+    /** Charges whose hitbox we grew, so we only ever shrink those. */
+    private final Set<WindChargeEntity> grown = new HashSet<>();
 
     public PearlCatch(DeathBanMod mod) { this.mod = mod; }
 
     public int trackedPearls() { return pearls.size(); }
     public int trackedCharges() { return charges.size(); }
-    public int catches() { return catches; }
-    private int catches = 0;
+    public int catches() { return grown.size(); }
 
     public void register() {
         ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
-            if (entity instanceof EnderPearlEntity p) {
-                if (!pearls.contains(p)) pearls.add(p);
-                DeathBanMod.LOGGER.info("PearlCatch: pearl spawned, tracking {} pearls / {} charges",
-                        pearls.size(), charges.size());
-            } else if (entity instanceof WindChargeEntity c) {
-                if (!charges.contains(c)) charges.add(c);
-                DeathBanMod.LOGGER.info("PearlCatch: charge spawned, tracking {} pearls / {} charges",
-                        pearls.size(), charges.size());
-            }
+            if (entity instanceof EnderPearlEntity p) { if (!pearls.contains(p)) pearls.add(p); }
+            else if (entity instanceof WindChargeEntity c) { if (!charges.contains(c)) charges.add(c); }
         });
         ServerEntityEvents.ENTITY_UNLOAD.register((entity, world) -> {
             if (entity instanceof EnderPearlEntity p) pearls.remove(p);
-            else if (entity instanceof WindChargeEntity c) charges.remove(c);
+            else if (entity instanceof WindChargeEntity c) { charges.remove(c); grown.remove(c); }
         });
         ServerTickEvents.END_WORLD_TICK.register(this::tickWorld);
-        ServerTickEvents.END_SERVER_TICK.register(this::tickPending);
-    }
-
-    private SoundEvent sound(String id) {
-        return Registries.SOUND_EVENT.get(Identifier.ofVanilla(id));
-    }
-
-    private void prune() {
-        pearls.removeIf(Entity::isRemoved);
-        charges.removeIf(Entity::isRemoved);
     }
 
     private void tickWorld(ServerWorld world) {
-        if (pearls.isEmpty() || charges.isEmpty()) return;
-        if (!mod.config.pearlCatchEnabled) return;
-        prune();
-        if (pearls.isEmpty() || charges.isEmpty()) return;
+        // Nothing in flight: two checks and out. No pearls means no work at all.
+        if (pearls.isEmpty() || charges.isEmpty()) {
+            if (!grown.isEmpty()) shrinkAll();
+            return;
+        }
+        if (!mod.config.pearlCatchEnabled) {
+            if (!grown.isEmpty()) shrinkAll();
+            return;
+        }
+
+        pearls.removeIf(Entity::isRemoved);
+        charges.removeIf(Entity::isRemoved);
+        if (pearls.isEmpty() || charges.isEmpty()) {
+            if (!grown.isEmpty()) shrinkAll();
+            return;
+        }
 
         double radius = mod.config.pearlCollisionRadius;
+        double minFlight = mod.config.pearlMinFlightDistance;
 
-        for (EnderPearlEntity pearl : new ArrayList<>(pearls)) {
+        for (WindChargeEntity charge : new ArrayList<>(charges)) {
+            if (charge.isRemoved() || charge.getEntityWorld() != world) continue;
+
+            Vec3d cp = charge.getEntityPos();
+            boolean near = nearEligiblePearl(world, cp, radius, minFlight);
+
+            if (near) {
+                charge.setBoundingBox(new Box(
+                        cp.x - radius, cp.y - radius, cp.z - radius,
+                        cp.x + radius, cp.y + radius, cp.z + radius));
+                grown.add(charge);
+            } else if (grown.remove(charge)) {
+                // Only shrink one we actually grew.
+                charge.setPosition(cp.x, cp.y, cp.z);
+            }
+        }
+    }
+
+    private void shrinkAll() {
+        for (WindChargeEntity c : new ArrayList<>(grown)) {
+            if (!c.isRemoved()) {
+                Vec3d p = c.getEntityPos();
+                c.setPosition(p.x, p.y, p.z);
+            }
+        }
+        grown.clear();
+    }
+
+    private boolean nearEligiblePearl(ServerWorld world, Vec3d cp, double radius, double minFlight) {
+        double reach = radius + 4.0;
+        double reachSq = reach * reach;
+        for (EnderPearlEntity pearl : pearls) {
             if (pearl.isRemoved() || pearl.getEntityWorld() != world) continue;
-            if (!(pearl.getOwner() instanceof ServerPlayerEntity thrower)) continue;
-
             Vec3d pp = pearl.getEntityPos();
-            Vec3d pv = pearl.getVelocity();
+            if (cp.squaredDistanceTo(pp) > reachSq) continue;
 
-            for (WindChargeEntity charge : new ArrayList<>(charges)) {
-                if (charge.isRemoved() || charge.getEntityWorld() != world) continue;
-                if (mod.config.pearlSameThrowerOnly) {
-                    if (!(charge.getOwner() instanceof ServerPlayerEntity co)) continue;
-                    if (!co.getUuid().equals(thrower.getUuid())) continue;
-                }
-
-                Vec3d cp = charge.getEntityPos();
-                Vec3d cv = charge.getVelocity();
-
-                Vec3d rp = pp.subtract(cp);
-                Vec3d rv = pv.subtract(cv);
-                double vv = rv.lengthSquared();
-                double t = vv < 1.0E-9 ? 0.0 : -rp.dotProduct(rv) / vv;
-                if (t < 0.0) t = 0.0;
-                if (t > 1.0) t = 1.0;
-
-                double dx = rp.x + rv.x * t;
-                double dy = rp.y + rv.y * t;
-                double dz = rp.z + rv.z * t;
-
-                double gap = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                if (gap > radius) {
-                    if (gap < radius * 4) {
-                        DeathBanMod.LOGGER.info("PearlCatch: near miss, closest {} blocks (radius {})",
-                                String.format("%.2f", gap), radius);
-                    }
-                    continue;
-                }
-
-                catches++;
-                DeathBanMod.LOGGER.info("PearlCatch: CAUGHT at {} blocks for {}",
-                        String.format("%.2f", gap), thrower.getGameProfile().name());
-                doCatch(world, pearl, charge, thrower, t);
-                return;
+            if (minFlight > 0 && pearl.getOwner() instanceof ServerPlayerEntity thrower) {
+                if (thrower.getEntityPos().squaredDistanceTo(pp) < minFlight * minFlight) continue;
             }
+            return true;
         }
-    }
-
-    private void doCatch(ServerWorld world, EnderPearlEntity pearl, WindChargeEntity charge,
-                         ServerPlayerEntity thrower, double t) {
-        Vec3d pp = pearl.getEntityPos(), pv = pearl.getVelocity();
-        Vec3d cp = charge.getEntityPos(), cv = charge.getVelocity();
-
-        double mx = ((pp.x + pv.x * t) + (cp.x + cv.x * t)) / 2.0;
-        double my = ((pp.y + pv.y * t) + (cp.y + cv.y * t)) / 2.0;
-        double mz = ((pp.z + pv.z * t) + (cp.z + cv.z * t)) / 2.0;
-
-        if (mod.config.pearlPlaySound) {
-            if (windBurst == null) windBurst = sound("entity.wind_charge.wind_burst");
-            if (pearlLand == null) pearlLand = sound("entity.enderman.teleport");
-            if (windBurst != null) {
-                world.playSound(null, mx, my, mz, windBurst, SoundCategory.PLAYERS, 1.0f, 1.0f);
-            }
-            if (pearlLand != null) {
-                world.playSound(null, mx, my, mz, pearlLand, SoundCategory.PLAYERS, 1.0f, 1.0f);
-            }
-        }
-
-        pearl.discard();
-        pearls.remove(pearl);
-
-        double nudge = mod.config.pearlPassthroughNudge;
-        if (nudge > 0 && cv.lengthSquared() > 1.0E-6) {
-            Vec3d dir = cv.normalize();
-            charge.setPosition(cp.x + dir.x * nudge, cp.y + dir.y * nudge, cp.z + dir.z * nudge);
-            charge.setVelocity(cv);
-        }
-
-        double dist = thrower.getEntityPos().distanceTo(new Vec3d(mx, my, mz));
-        double taper = mod.config.pearlDelayTaperDistance;
-        double frac = taper <= 0 ? 1.0 : Math.min(dist / taper, 1.0);
-        int min = Math.min(mod.config.pearlDelayMinTicks, mod.config.pearlDelayMaxTicks);
-        int max = Math.max(mod.config.pearlDelayMinTicks, mod.config.pearlDelayMaxTicks);
-        int delay = (int) Math.round(min + (max - min) * frac);
-
-        schedule(thrower, mx, my, mz, Math.max(0, delay));
-    }
-
-    private void schedule(ServerPlayerEntity p, double x, double y, double z, int ticks) {
-        if (ticks <= 0) { apply(p, x, y, z); return; }
-        pending.add(new DelayedTeleport(p, x, y, z, ticks));
-    }
-
-    private void tickPending(MinecraftServer server) {
-        if (pending.isEmpty()) return;
-        for (int i = pending.size() - 1; i >= 0; i--) {
-            DelayedTeleport d = pending.get(i);
-            if (--d.ticksLeft > 0) continue;
-            pending.remove(i);
-            apply(d.player, d.x, d.y, d.z);
-        }
-    }
-
-    private void apply(ServerPlayerEntity p, double x, double y, double z) {
-        if (p == null || p.isRemoved()) return;
-        Vec3d keep = p.getVelocity().multiply(mod.config.pearlMomentumKeep);
-
-        p.teleport(((ServerWorld) p.getEntityWorld()), x, y, z, PositionFlag.ROT, 0.0f, 0.0f, false);
-
-        p.setVelocity(keep);
-        p.velocityDirty = true;
-
-        // NO DAMAGE IS EVER APPLIED HERE.
-    }
-
-    private static final class DelayedTeleport {
-        final ServerPlayerEntity player;
-        final double x, y, z;
-        int ticksLeft;
-
-        DelayedTeleport(ServerPlayerEntity player, double x, double y, double z, int ticks) {
-            this.player = player; this.x = x; this.y = y; this.z = z; this.ticksLeft = ticks;
-        }
+        return false;
     }
 }
