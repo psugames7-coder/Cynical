@@ -3,9 +3,7 @@
   "minVersion": "0.8",
   "package": "com.kephale.deathban.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [
-    "PlayerListS2CPacketMixin"
-  ],
+  "mixins": [],
   "injectors": {
     "defaultRequire": 1
   }
