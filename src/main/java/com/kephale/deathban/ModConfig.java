@@ -22,6 +22,7 @@ public final class ModConfig {
 
     public boolean pearlCatchEnabled = true;
     public double pearlCollisionRadius = 2.5;
+    public double pearlMinFlightDistance = 3.0;
     public boolean pearlSameThrowerOnly = false;
     public double pearlPassthroughNudge = 2.0;
     public int pearlDelayMaxTicks = 8;
@@ -47,6 +48,8 @@ public final class ModConfig {
             cfg = new ModConfig();
         }
         cfg.file = f;
+        if (cfg.pearlCollisionRadius < 0.5) cfg.pearlCollisionRadius = 2.5;
+        if (cfg.pearlMinFlightDistance < 0) cfg.pearlMinFlightDistance = 3.0;
         cfg.save();
         return cfg;
     }
