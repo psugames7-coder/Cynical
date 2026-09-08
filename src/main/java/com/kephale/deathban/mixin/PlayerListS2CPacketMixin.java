@@ -4,38 +4,30 @@ import com.kephale.deathban.DeathBanMod;
 import com.mojang.authlib.GameProfile;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/**
- * Makes /nick actually change the username.
- *
- * <p>The old approach rewrote the live {@link GameProfile} by reflection. That
- * stopped working in 1.21.2, where GameProfile became a Java record: record
- * fields cannot be reassigned reflectively at all, so the write threw, the
- * catch swallowed it, and only the skin ever changed.
- *
- * <p>This does it the way that survives. The live profile is left alone, and a
- * substitute is handed over only at the point where the player list is built
- * for other clients. Records are trivially constructible, just not mutable.
- * Everything that needs the real identity, saving, permissions, bans, still
- * sees the untouched original.
- *
- * <p><b>If the server fails to start with a mixin apply error naming this
- * class, delete its line from deathban.mixins.json.</b> The mod then runs
- * exactly as before with skin-only nicks, and nothing else is affected.
- */
 @Mixin(PlayerListS2CPacket.Entry.class)
 public class PlayerListS2CPacketMixin {
 
-    @Redirect(
-            method = "<init>(Lnet/minecraft/server/network/ServerPlayerEntity;)V",
-            at = @At(value = "INVOKE",
-                     target = "Lnet/minecraft/server/network/ServerPlayerEntity;getGameProfile()Lcom/mojang/authlib/GameProfile;"))
-    private GameProfile deathban$substituteNickedProfile(ServerPlayerEntity player) {
-        GameProfile real = player.getGameProfile();
-        if (DeathBanMod.INSTANCE == null || DeathBanMod.INSTANCE.nickCore == null) return real;
-        return DeathBanMod.INSTANCE.nickCore.profileFor(player, real);
+    @Shadow @Final private GameProfile profile;
+
+    @Inject(method = "profile", at = @At("HEAD"), cancellable = true)
+    private void deathban$nickedProfile(CallbackInfoReturnable<GameProfile> cir) {
+        try {
+            DeathBanMod mod = DeathBanMod.INSTANCE;
+            if (mod == null || mod.nickCore == null || mod.server() == null) return;
+            if (profile == null || profile.id() == null) return;
+            if (!mod.nickCore.isNicked(profile.id())) return;
+            ServerPlayerEntity p = mod.server().getPlayerManager().getPlayer(profile.id());
+            if (p == null) return;
+            GameProfile swapped = mod.nickCore.profileFor(p, profile);
+            if (swapped != null && swapped != profile) cir.setReturnValue(swapped);
+        } catch (Throwable ignored) {
+        }
     }
 }
