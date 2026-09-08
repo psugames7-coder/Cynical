@@ -3,7 +3,6 @@ package com.kephale.deathban;
 import net.minecraft.server.world.ServerWorld;
 import com.mojang.authlib.GameProfile;
 import com.mojang.authlib.properties.Property;
-import com.mojang.authlib.properties.PropertyMap;
 import net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
@@ -26,7 +25,6 @@ public final class NickCore {
 
     private final Map<UUID, String> nicks = new HashMap<>();
     private final Map<UUID, String> realNames = new HashMap<>();
-    private final Map<UUID, Property> originalTextures = new HashMap<>();
     private final Map<String, String[]> skinCache = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String, Long> skinCacheTime = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -86,7 +84,6 @@ public final class NickCore {
                     DeathBanMod.LOGGER.info("No skin found for '{}' - name applied without it.", nick);
                     return;
                 }
-                setProfileSkin(player, value, signature);
                 refresh(player);
             });
         });
@@ -95,10 +92,7 @@ public final class NickCore {
     public void unnick(ServerPlayerEntity player) {
         UUID id = player.getUuid();
         if (!nicks.containsKey(id)) return;
-        String real = getRealName(player);
         nicks.remove(id);
-
-        restoreSkin(player);
         refresh(player);
         realNames.remove(id);
     }
@@ -113,37 +107,6 @@ public final class NickCore {
         }
         nicks.clear();
         realNames.clear();
-        originalTextures.clear();
-    }
-
-    private void setProfileSkin(ServerPlayerEntity player, String value, String signature) {
-        try {
-            GameProfile profile = player.getGameProfile();
-            PropertyMap props = profile.properties();
-
-            if (!originalTextures.containsKey(player.getUuid())) {
-                var existing = props.get("textures");
-                if (existing != null && !existing.isEmpty()) {
-                    originalTextures.put(player.getUuid(), existing.iterator().next());
-                }
-            }
-            props.removeAll("textures");
-            props.put("textures", new Property("textures", value, signature));
-        } catch (Throwable t) {
-            DeathBanMod.LOGGER.warn("Could not set profile skin", t);
-        }
-    }
-
-    private void restoreSkin(ServerPlayerEntity player) {
-        try {
-            GameProfile profile = player.getGameProfile();
-            PropertyMap props = profile.properties();
-            props.removeAll("textures");
-            Property original = originalTextures.remove(player.getUuid());
-            if (original != null) props.put("textures", original);
-        } catch (Throwable t) {
-            DeathBanMod.LOGGER.warn("Could not restore profile skin", t);
-        }
     }
 
     private void refresh(ServerPlayerEntity player) {
