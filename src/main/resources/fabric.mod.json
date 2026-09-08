@@ -4,15 +4,11 @@
   "version": "${version}",
   "name": "DeathBan",
   "description": "PvP death bans, escalating curve, head drops, nick with skin, and PearlCatch.",
-  "authors": [
-    "Kephale"
-  ],
+  "authors": ["Kephale"],
   "license": "MIT",
-  "environment": "server",
+  "environment": "*",
   "entrypoints": {
-    "server": [
-      "com.kephale.deathban.DeathBanMod"
-    ]
+    "main": ["com.kephale.deathban.DeathBanMod"]
   },
   "depends": {
     "fabricloader": ">=0.16.0",
@@ -20,7 +16,5 @@
     "java": ">=21",
     "fabric-api": "*"
   },
-  "mixins": [
-    "deathban.mixins.json"
-  ]
+  "mixins": ["deathban.mixins.json"]
 }
