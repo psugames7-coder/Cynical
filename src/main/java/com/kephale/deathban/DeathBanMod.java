@@ -288,6 +288,7 @@ public class DeathBanMod implements ModInitializer {
 
     private void onDisconnect(ServerPlayerEntity player) {
         if (nickCore != null && nickCore.isNicked(player.getUuid())) nickCore.unnick(player);
+        clearFakeNick(player.getUuid());
     }
 
     public boolean isInvisible(ServerPlayerEntity p) {
