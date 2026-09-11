@@ -28,7 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
-    public static final String VERSION = "1.2.2";
+    public static final String VERSION = "1.2.3";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
@@ -63,7 +63,7 @@ public class DeathBanMod implements ModInitializer {
             LOGGER.info("=== DeathBan {} ready - {} records, {} corrected ===",
                     VERSION, store.all().size(), fixed);
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(s -> { nickCore.restoreAll(); store.save(); });
+        ServerLifecycleEvents.SERVER_STOPPING.register(s -> store.save());
 
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayerEntity player) onPlayerDeath(player, source);
@@ -156,10 +156,6 @@ public class DeathBanMod implements ModInitializer {
             kickLater(victim, banMessage(ne.deaths));
             return;
         }
-        if (nickCore != null && nickCore.isNicked(id)) {
-            if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
-            return;
-        }
 
         if (!config.deathBanEnabled || !pvp) {
             if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
@@ -192,7 +188,6 @@ public class DeathBanMod implements ModInitializer {
 
     private void sendDeathMessage(ServerPlayerEntity victim, ServerPlayerEntity killer, DamageSource source) {
         String victimName = displayNameOf(victim);
-        String victimReal = victim.getGameProfile().name();
 
         if (killer != null && killer != victim
                 && config.hideInvisibleKillers && isInvisible(killer)) {
@@ -206,12 +201,6 @@ public class DeathBanMod implements ModInitializer {
             text = source.getDeathMessage(victim).getString();
         } catch (Throwable t) {
             text = victimName + " died";
-        }
-        if (!victimName.equals(victimReal)) text = text.replace(victimReal, victimName);
-        if (killer != null) {
-            String kReal = killer.getGameProfile().name();
-            String kShown = displayNameOf(killer);
-            if (!kShown.equals(kReal)) text = text.replace(kReal, kShown);
         }
         broadcast(Text.literal(text));
     }
@@ -244,14 +233,19 @@ public class DeathBanMod implements ModInitializer {
         }
     }
 
+    /** Whatever name the player is actually showing as, including another mod's nick. */
     public String displayNameOf(ServerPlayerEntity p) {
-        if (nickCore != null && nickCore.isNicked(p.getUuid())) return nickCore.getNick(p.getUuid());
         String nick = fakeNick.get(p.getUuid());
-        return nick != null ? nick : p.getGameProfile().name();
+        if (nick != null) return nick;
+        try {
+            String shown = p.getDisplayName() == null ? null : p.getDisplayName().getString();
+            if (shown != null && !shown.isEmpty()) return shown;
+        } catch (Throwable ignored) {
+        }
+        return p.getGameProfile().name();
     }
 
     public String realNameOf(ServerPlayerEntity p) {
-        if (nickCore != null && nickCore.isNicked(p.getUuid())) return nickCore.getRealName(p);
         return p.getGameProfile().name();
     }
 
@@ -320,7 +314,6 @@ public class DeathBanMod implements ModInitializer {
     }
 
     private void onDisconnect(ServerPlayerEntity player) {
-        if (nickCore != null && nickCore.isNicked(player.getUuid())) nickCore.unnick(player);
         clearFakeNick(player.getUuid());
     }
 
