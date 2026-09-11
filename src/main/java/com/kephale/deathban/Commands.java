@@ -132,64 +132,12 @@ public final class Commands {
                                     })))
             );
 
-            dispatcher.register(literal("nick")
-                    .requires(Commands::isAdmin)
-                    .then(argument("player", EntityArgumentType.player())
-                            .then(argument("nick", StringArgumentType.word())
-                                    .executes(ctx -> {
-                                        ServerPlayerEntity t = EntityArgumentType.getPlayer(ctx, "player");
-                                        String nick = StringArgumentType.getString(ctx, "nick");
-                                        String real = mod.nickCore.getRealName(t);
-                                        mod.nickCore.nick(t, nick);
-                                        msg(ctx, "§aNicked §f" + real + "§a as §f" + nick);
-                                        return 1;
-                                    }))));
-
-            dispatcher.register(literal("unnick")
-                    .requires(Commands::isAdmin)
-                    .then(literal("all").executes(ctx -> {
-                        int n = 0;
-                        for (UUID id : mod.nickCore.nickedPlayers()) {
-                            ServerPlayerEntity t = ctx.getSource().getServer().getPlayerManager().getPlayer(id);
-                            if (t != null) { mod.nickCore.unnick(t); n++; }
-                        }
-                        msg(ctx, "§aCleared " + n + " nick(s).");
-                        return 1;
-                    }))
-                    .then(argument("player", EntityArgumentType.player())
-                            .executes(ctx -> {
-                                ServerPlayerEntity t = EntityArgumentType.getPlayer(ctx, "player");
-                                if (!mod.nickCore.isNicked(t.getUuid())) { msg(ctx, "§7Not nicked."); return 0; }
-                                String real = mod.nickCore.getRealName(t);
-                                mod.nickCore.unnick(t);
-                                msg(ctx, "§aUn-nicked §f" + real);
-                                return 1;
-                            })));
-
-            dispatcher.register(literal("realname")
-                    .requires(Commands::isAdmin)
-                    .then(argument("nick", StringArgumentType.word())
-                            .executes(ctx -> {
-                                String nick = StringArgumentType.getString(ctx, "nick");
-                                for (UUID id : mod.nickCore.nickedPlayers()) {
-                                    ServerPlayerEntity t = ctx.getSource().getServer().getPlayerManager().getPlayer(id);
-                                    if (t != null && nick.equalsIgnoreCase(mod.nickCore.getNick(id))) {
-                                        msg(ctx, "§f" + nick + " §7is really §b" + mod.nickCore.getRealName(t));
-                                        return 1;
-                                    }
-                                }
-                                msg(ctx, "§7No nicked player by that name.");
-                                return 0;
-                            })));
-
             dispatcher.register(literal("pearlcatch")
                     .requires(Commands::isAdmin)
                     .executes(ctx -> {
                         msg(ctx, "PearlCatch " + onOff(mod.config.pearlCatchEnabled)
                                 + " | radius " + mod.config.pearlCollisionRadius
-                                + " | delay " + mod.config.pearlDelayMinTicks + "-" + mod.config.pearlDelayMaxTicks
-                                + " | taper " + mod.config.pearlDelayTaperDistance
-                                + " | momentum " + mod.config.pearlMomentumKeep);
+                                + " | minflight " + mod.config.pearlMinFlightDistance);
                         return 1;
                     })
                     .then(literal("on").executes(ctx -> {
@@ -206,27 +154,11 @@ public final class Commands {
                                 mod.config.save();
                                 msg(ctx, "Collision radius " + mod.config.pearlCollisionRadius); return 1;
                             })))
-                    .then(literal("delay")
-                            .then(argument("min", IntegerArgumentType.integer(0, 40))
-                                    .then(argument("max", IntegerArgumentType.integer(0, 40))
-                                            .executes(ctx -> {
-                                                mod.config.pearlDelayMinTicks = IntegerArgumentType.getInteger(ctx, "min");
-                                                mod.config.pearlDelayMaxTicks = IntegerArgumentType.getInteger(ctx, "max");
-                                                mod.config.save();
-                                                msg(ctx, "Catch delay " + mod.config.pearlDelayMinTicks
-                                                        + "-" + mod.config.pearlDelayMaxTicks + " ticks"); return 1;
-                                            }))))
-                    .then(literal("momentum").then(argument("v", DoubleArgumentType.doubleArg(0.0, 2.0))
+                    .then(literal("minflight").then(argument("v", DoubleArgumentType.doubleArg(0.0, 20.0))
                             .executes(ctx -> {
-                                mod.config.pearlMomentumKeep = DoubleArgumentType.getDouble(ctx, "v");
+                                mod.config.pearlMinFlightDistance = DoubleArgumentType.getDouble(ctx, "v");
                                 mod.config.save();
-                                msg(ctx, "Momentum keep " + mod.config.pearlMomentumKeep); return 1;
-                            })))
-                    .then(literal("sound").then(argument("on", BoolArgumentType.bool())
-                            .executes(ctx -> {
-                                mod.config.pearlPlaySound = BoolArgumentType.getBool(ctx, "on");
-                                mod.config.save();
-                                msg(ctx, "Catch sound " + onOff(mod.config.pearlPlaySound)); return 1;
+                                msg(ctx, "Min pearl flight " + mod.config.pearlMinFlightDistance); return 1;
                             }))));
         });
     }
@@ -243,24 +175,18 @@ public final class Commands {
                 "§78. §e/deathban item §7- give yourself a Revive Token",
                 "§79. §e/deathban debug §7- version and live state",
                 "§710. §e/deathban toggle <feature> <true|false>",
-                "§6=== Nick ===",
-                "§711. §e/nick <player> <nick> §7- change name and skin",
-                "§712. §e/unnick <player> §7| §eall §7- remove nick(s)",
-                "§713. §e/realname <nick> §7- who is behind a nick",
-                "§714. §e/deathban fakenick <player> <nick> §7- fake death curve",
-                "§715. §e/deathban revertnick <player> §7- end fake mode",
+                "§711. §e/deathban fakenick <player> <nick> §7- fake death curve",
+                "§712. §e/deathban revertnick <player> §7- end fake mode",
                 "§6=== Data ===",
-                "§716. §e/deathban export §7- timestamped JSON copy",
-                "§717. §e/deathban import <file> [overwrite]",
-                "§718. §e/deathban reload §7- re-read config and data",
+                "§713. §e/deathban export §7- timestamped JSON copy",
+                "§714. §e/deathban import <file> [overwrite]",
+                "§715. §e/deathban reload §7- re-read config and data",
                 "§6=== PearlCatch ===",
-                "§719. §e/pearlcatch §7- current settings",
-                "§720. §e/pearlcatch on|off",
-                "§721. §e/pearlcatch radius <v>",
-                "§722. §e/pearlcatch delay <min> <max>",
-                "§723. §e/pearlcatch momentum <v>",
-                "§724. §e/pearlcatch sound <true|false>",
-                "§725. §e/deathban help §7- this list"
+                "§716. §e/pearlcatch §7- current settings",
+                "§717. §e/pearlcatch on|off",
+                "§718. §e/pearlcatch radius <v>",
+                "§719. §e/pearlcatch minflight <v>",
+                "§720. §e/deathban help §7- this list"
         };
         for (String l : lines) src.sendFeedback(() -> Text.literal(l), false);
         return 1;
@@ -376,7 +302,6 @@ public final class Commands {
         }
         String realName = mod.realNameOf(target);
         mod.setFakeNick(target.getUuid(), nick);
-        if (!mod.nickCore.isNicked(target.getUuid())) mod.nickCore.nick(target, nick);
         msg(ctx, "§aFake-nick ON for §f" + realName + "§a as §f" + nick
                 + "§a - on " + start + " deaths" + (seeded ? " (new, randomised)" : " (from history)") + ".");
         return 1;
@@ -386,7 +311,6 @@ public final class Commands {
             throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
         mod.clearFakeNick(target.getUuid());
-        if (mod.nickCore.isNicked(target.getUuid())) mod.nickCore.unnick(target);
         msg(ctx, "§eFake-nick OFF for §f" + mod.realNameOf(target));
         return 1;
     }
@@ -437,14 +361,14 @@ public final class Commands {
 
     private static int debug(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
         ServerPlayerEntity p = ctx.getSource().getPlayer();
-        msg(ctx, "§6DeathBan 1.2.1 §7| admin: " + isAdmin(ctx.getSource()));
+        msg(ctx, "§6DeathBan 1.2.3 §7| admin: " + isAdmin(ctx.getSource()));
         msg(ctx, "§7ownDeathMessages: " + mod.config.ownDeathMessages
                 + " | hideInvisibleKillers: " + mod.config.hideInvisibleKillers);
         msg(ctx, "§7pearlcatch: " + mod.config.pearlCatchEnabled
                 + " | radius " + mod.config.pearlCollisionRadius
-                + " | delay " + mod.config.pearlDelayMinTicks + "-" + mod.config.pearlDelayMaxTicks
-                + " | momentum " + mod.config.pearlMomentumKeep);
+                + " | minflight " + mod.config.pearlMinFlightDistance);
         if (p != null) {
+            msg(ctx, "§7you show as: " + mod.displayNameOf(p) + " | real: " + mod.realNameOf(p));
             msg(ctx, "§7you invisible: " + mod.isInvisible(p));
             msg(ctx, "§7your record: " + mod.store.get(p.getUuid()));
         }
