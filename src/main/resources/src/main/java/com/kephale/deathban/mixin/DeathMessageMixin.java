@@ -18,7 +18,10 @@ public abstract class DeathMessageMixin {
             if (mod == null || mod.config == null) return;
             if (!mod.config.ownDeathMessages) return;
             if (mod.isWritingOwnMessage()) return;
-            if (DeathBanMod.looksLikeDeathMessage(message)) ci.cancel();
+            if (DeathBanMod.looksLikeDeathMessage(message)) {
+                DeathBanMod.vanillaDeathSuppressed = true;
+                ci.cancel();
+            }
         } catch (Throwable ignored) {
         }
     }
