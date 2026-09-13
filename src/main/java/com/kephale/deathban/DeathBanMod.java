@@ -28,10 +28,13 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
-    public static final String VERSION = "1.2.3";
+    public static final String VERSION = "1.2.4";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
+
+    /** Set by DeathMessageMixin when it actually cancels a vanilla death message. */
+    public static volatile boolean vanillaDeathSuppressed = false;
 
     public ModConfig config;
     public PlayerDataStore store;
@@ -60,8 +63,8 @@ public class DeathBanMod implements ModInitializer {
             this.server = s;
             syncDeathMessageGameRule();
             int fixed = normaliseCounts();
-            LOGGER.info("=== DeathBan {} ready - {} records, {} corrected ===",
-                    VERSION, store.all().size(), fixed);
+            LOGGER.info("=== DeathBan {} ready - {} records, {} corrected, pearlcatch {} ===",
+                    VERSION, store.all().size(), fixed, config.pearlCatchEnabled);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> store.save());
 
@@ -138,6 +141,12 @@ public class DeathBanMod implements ModInitializer {
     public String fakeNickOf(UUID player) { return fakeNick.get(player); }
 
     private void onPlayerDeath(ServerPlayerEntity victim, DamageSource source) {
+        // Vanilla already tried to send its message before this fires. If the
+        // mixin ate it we owe the players one, otherwise they already have one
+        // and we must not send a second.
+        boolean weOweAMessage = vanillaDeathSuppressed;
+        vanillaDeathSuppressed = false;
+
         ServerPlayerEntity killer = null;
         if (source.getAttacker() instanceof ServerPlayerEntity sp) killer = sp;
 
@@ -152,13 +161,13 @@ public class DeathBanMod implements ModInitializer {
             ne.lastDeath = now();
             store.save();
             announceDeath(nick, ne.deaths);
-            if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
+            if (weOweAMessage) sendDeathMessage(victim, killer, source);
             kickLater(victim, banMessage(ne.deaths));
             return;
         }
 
         if (!config.deathBanEnabled || !pvp) {
-            if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
+            if (weOweAMessage) sendDeathMessage(victim, killer, source);
             return;
         }
 
@@ -176,7 +185,7 @@ public class DeathBanMod implements ModInitializer {
             dropAt(victim, new ItemStack(Items.PLAYER_HEAD));
         }
         announceDeath(displayNameOf(victim), e.deaths);
-        if (config.ownDeathMessages) sendDeathMessage(victim, killer, source);
+        if (weOweAMessage) sendDeathMessage(victim, killer, source);
 
         kickLater(victim, banMessage(e.deaths));
         if (op) {
@@ -233,7 +242,6 @@ public class DeathBanMod implements ModInitializer {
         }
     }
 
-    /** Whatever name the player is actually showing as, including another mod's nick. */
     public String displayNameOf(ServerPlayerEntity p) {
         String nick = fakeNick.get(p.getUuid());
         if (nick != null) return nick;
@@ -262,8 +270,16 @@ public class DeathBanMod implements ModInitializer {
     private void kickLater(ServerPlayerEntity player, String reason) {
         if (server == null) return;
         server.execute(() -> {
-            try { player.networkHandler.disconnect(Text.literal(reason)); }
-            catch (Throwable t) { LOGGER.warn("Could not kick after death", t); }
+            try {
+                // Already gone? Disconnecting again makes the server announce
+                // the leave a second time.
+                if (player.isRemoved()) return;
+                if (player.networkHandler == null) return;
+                if (server.getPlayerManager().getPlayer(player.getUuid()) == null) return;
+                player.networkHandler.disconnect(Text.literal(reason));
+            } catch (Throwable t) {
+                LOGGER.warn("Could not kick after death", t);
+            }
         });
     }
 
