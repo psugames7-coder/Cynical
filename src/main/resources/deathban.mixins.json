@@ -4,7 +4,8 @@
   "package": "com.kephale.deathban.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "DeathMessageMixin"
+    "DeathMessageMixin",
+    "WorldBorderMixin"
   ],
   "injectors": {
     "defaultRequire": 0
