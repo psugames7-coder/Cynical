@@ -23,13 +23,6 @@ public final class ModConfig {
     public boolean pearlCatchEnabled = true;
     public double pearlCollisionRadius = 2.5;
     public double pearlMinFlightDistance = 3.0;
-    public boolean pearlSameThrowerOnly = false;
-    public double pearlPassthroughNudge = 2.0;
-    public int pearlDelayMaxTicks = 8;
-    public int pearlDelayMinTicks = 5;
-    public double pearlDelayTaperDistance = 7.0;
-    public double pearlMomentumKeep = 0.8;
-    public boolean pearlPlaySound = true;
 
     private transient Path file;
 
@@ -48,6 +41,9 @@ public final class ModConfig {
             cfg = new ModConfig();
         }
         cfg.file = f;
+        // PearlCatch always comes back on at startup. Turn it off with
+        // /pearlcatch off and it stays off only until the next restart.
+        cfg.pearlCatchEnabled = true;
         if (cfg.pearlCollisionRadius < 0.5) cfg.pearlCollisionRadius = 2.5;
         if (cfg.pearlMinFlightDistance < 0) cfg.pearlMinFlightDistance = 3.0;
         cfg.save();
