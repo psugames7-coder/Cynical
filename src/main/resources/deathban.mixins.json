@@ -5,7 +5,8 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "DeathMessageMixin",
-    "WorldBorderMixin"
+    "WorldBorderMixin",
+    "WorldBorderDamageMixin"
   ],
   "injectors": {
     "defaultRequire": 0
