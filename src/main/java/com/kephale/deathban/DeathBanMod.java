@@ -28,7 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
-    public static final String VERSION = "1.2.4";
+    public static final String VERSION = "1.2.5";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
@@ -88,6 +88,18 @@ public class DeathBanMod implements ModInitializer {
     public int pearlCatchTrackedCharges() { return pearlCatch == null ? -1 : pearlCatch.trackedCharges(); }
     public int pearlCatchCount() { return pearlCatch == null ? -1 : pearlCatch.catches(); }
 
+    /** VexBot and Carpet fake players. Real accounts never match. */
+    public static boolean isBot(ServerPlayerEntity p) {
+        if (p == null) return false;
+        try {
+            String cls = p.getClass().getName().toLowerCase();
+            if (cls.contains("fake") || cls.contains("bot")) return true;
+            return p.networkHandler == null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public int normaliseCounts() {
         int fixed = 0;
         for (PlayerDataStore.Entry e : store.all().values()) {
@@ -141,9 +153,6 @@ public class DeathBanMod implements ModInitializer {
     public String fakeNickOf(UUID player) { return fakeNick.get(player); }
 
     private void onPlayerDeath(ServerPlayerEntity victim, DamageSource source) {
-        // Vanilla already tried to send its message before this fires. If the
-        // mixin ate it we owe the players one, otherwise they already have one
-        // and we must not send a second.
         boolean weOweAMessage = vanillaDeathSuppressed;
         vanillaDeathSuppressed = false;
 
@@ -269,10 +278,9 @@ public class DeathBanMod implements ModInitializer {
 
     private void kickLater(ServerPlayerEntity player, String reason) {
         if (server == null) return;
+        if (isBot(player)) return;
         server.execute(() -> {
             try {
-                // Already gone? Disconnecting again makes the server announce
-                // the leave a second time.
                 if (player.isRemoved()) return;
                 if (player.networkHandler == null) return;
                 if (server.getPlayerManager().getPlayer(player.getUuid()) == null) return;
