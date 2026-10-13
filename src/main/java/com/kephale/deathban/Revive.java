@@ -24,18 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * The revive system, ported from the Paper plugin.
- *
- * <p>A Revive Token is a named echo shard. Right clicking it opens a paginated
- * menu of every permanently banned player, one skinned head per slot. Clicking
- * a head revives that player if you are carrying both their real head and a
- * token. Both are consumed and they come back on {@code reviveDeaths} deaths,
- * two short of permanent, not fresh.
- *
- * <p>One token revive per player, ever. After that they are flagged and the
- * menu refuses.
- */
 public final class Revive {
 
     public static final String TOKEN_NAME = "Revive Token";
@@ -53,12 +41,9 @@ public final class Revive {
             if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
             if (!isToken(player.getStackInHand(hand))) return ActionResult.PASS;
             open(sp, 0);
-            // CONSUME stops the shard being used for anything else this click.
             return ActionResult.CONSUME;
         });
     }
-
-    // ---------- items ----------
 
     public ItemStack makeToken() {
         ItemStack token = new ItemStack(Items.ECHO_SHARD);
@@ -71,11 +56,6 @@ public final class Revive {
         return token;
     }
 
-    /**
-     * Matches the crafted token as well as the one from {@code /deathban item}.
-     * Name match only, so the datapack recipe and this code can never drift into
-     * producing two items that don't recognise each other.
-     */
     public boolean isToken(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         if (!stack.isOf(Items.ECHO_SHARD)) return false;
@@ -94,8 +74,6 @@ public final class Revive {
         return head;
     }
 
-    // ---------- inventory scanning ----------
-
     private int findToken(ServerPlayerEntity p) {
         PlayerInventory inv = p.getInventory();
         for (int i = 0; i < inv.size(); i++) if (isToken(inv.getStack(i))) return i;
@@ -110,7 +88,6 @@ public final class Revive {
         if (it.isEmpty()) p.getInventory().setStack(slot, ItemStack.EMPTY);
     }
 
-    /** Slot holding a head belonging to {@code target}, or -1. */
     private int findHeadSlot(ServerPlayerEntity p, UUID target, String targetName) {
         PlayerInventory inv = p.getInventory();
         for (int i = 0; i < inv.size(); i++) {
@@ -125,9 +102,6 @@ public final class Revive {
         return findHeadSlot(p, target, targetName) >= 0;
     }
 
-    // ---------- the menu ----------
-
-    /** Every permanently banned record, stable order so pages don't shuffle. */
     private List<UUID> banned() {
         List<UUID> out = new ArrayList<>(mod.store.banned(mod.config.maxDeaths));
         out.sort((a, b) -> {
@@ -186,7 +160,6 @@ public final class Revive {
         return it;
     }
 
-    /** A read-only 6 row chest. Every click is intercepted; nothing can be taken. */
     private final class ReviveScreenHandler extends GenericContainerScreenHandler {
         private final int page;
 
@@ -197,7 +170,6 @@ public final class Revive {
 
         @Override
         public void onSlotClick(int slotIndex, int button, SlotActionType actionType, PlayerEntity player) {
-            // Nothing in this menu is ever picked up, dragged, or shift-clicked out.
             if (!(player instanceof ServerPlayerEntity sp)) return;
             if (slotIndex < 0 || slotIndex >= 54) return;
 
@@ -219,7 +191,6 @@ public final class Revive {
 
     private void reopen(ServerPlayerEntity p, int page) {
         p.closeHandledScreen();
-        // Next tick, so the client is not mid close when the new screen arrives.
         if (mod.server() != null) mod.server().execute(() -> { if (!p.isRemoved()) open(p, page); });
     }
 
@@ -229,12 +200,10 @@ public final class Revive {
 
         if (e == null) { deny(p, "No record for " + name + "."); return; }
 
-        // One token revive per player, ever.
         if (e.tokenRevived) {
             deny(p, name + " has already used their one token revive.");
             return;
         }
-        // Head is checked BEFORE the token so a failed revive never wastes one.
         if (!hasHead(p, target, name)) {
             deny(p, "You need " + name + "'s head to revive them.");
             return;
@@ -265,16 +234,6 @@ public final class Revive {
         p.closeHandledScreen();
     }
 
-    // ------------------------------------------------------------------
-    // UNVERIFIED API. If the build fails, it is almost certainly in here.
-    // Everything above uses long-stable signatures.
-    // ------------------------------------------------------------------
-
-    /**
-     * Does this head belong to {@code target}? Matches on profile id first and
-     * falls back to the profile name, because a head crafted or dropped before a
-     * name change can carry one without the other.
-     */
     private boolean headMatches(ItemStack stack, UUID target, String targetName) {
         ProfileComponent pc = stack.get(DataComponentTypes.PROFILE);
         if (pc == null) return false;
@@ -283,8 +242,7 @@ public final class Revive {
             if (gp != null && target.equals(gp.id())) return true;
             if (pc.getName().isPresent() && targetName.equalsIgnoreCase(pc.getName().get())) return true;
         } catch (Throwable t) {
-            DeathBanMod.LOGGER.error("ProfileComponent accessors are named something else on this "
-                    + "version. Fix Revive.headMatches; nothing else depends on it.", t);
+            DeathBanMod.LOGGER.error("Could not read a head's profile", t);
         }
         return false;
     }
