@@ -6,6 +6,8 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ProfileComponent;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.effect.StatusEffects;
@@ -28,12 +30,11 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
-    public static final String VERSION = "1.2.5";
+    public static final String VERSION = "1.5.0";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
 
-    /** Set by DeathMessageMixin when it actually cancels a vanilla death message. */
     public static volatile boolean vanillaDeathSuppressed = false;
 
     public ModConfig config;
@@ -42,10 +43,24 @@ public class DeathBanMod implements ModInitializer {
     private MinecraftServer server;
 
     private PearlCatch pearlCatch;
-    public NickCore nickCore;
     public Revive revive;
-    private final Map<UUID, String> fakeNick = new HashMap<>();
+    public TabListRange tabList;
+    public DeathPanel panel;
+
+    private final Map<UUID, Disguise> disguises = new HashMap<>();
     private boolean writingOwn = false;
+
+    public static final class Disguise {
+        public final String name;
+        public final Integer lives;
+        public final boolean death;
+
+        public Disguise(String name, Integer lives, boolean death) {
+            this.name = name;
+            this.lives = lives;
+            this.death = death;
+        }
+    }
 
     @Override
     public void onInitialize() {
@@ -56,15 +71,16 @@ public class DeathBanMod implements ModInitializer {
         store.load();
 
         pearlCatch = new PearlCatch(this);
-        nickCore = new NickCore(this);
         revive = new Revive(this);
+        tabList = new TabListRange(this);
+        panel = new DeathPanel(this);
 
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
             this.server = s;
             syncDeathMessageGameRule();
             int fixed = normaliseCounts();
-            LOGGER.info("=== DeathBan {} ready - {} records, {} corrected, pearlcatch {} ===",
-                    VERSION, store.all().size(), fixed, config.pearlCatchEnabled);
+            LOGGER.info("=== DeathBan {} ready - {} records, {} corrected, elimination {}% ===",
+                    VERSION, store.all().size(), fixed, config.eliminationChance);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> store.save());
 
@@ -73,11 +89,15 @@ public class DeathBanMod implements ModInitializer {
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> onJoin(handler.player));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> onDisconnect(handler.player));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> {
+            disguises.remove(handler.player.getUuid());
+            tabList.forget(handler.player.getUuid());
+        });
 
         Commands.register(this);
         pearlCatch.register();
         revive.register();
+        tabList.register();
 
         LOGGER.info("DeathBan initialised.");
     }
@@ -88,7 +108,9 @@ public class DeathBanMod implements ModInitializer {
     public int pearlCatchTrackedCharges() { return pearlCatch == null ? -1 : pearlCatch.trackedCharges(); }
     public int pearlCatchCount() { return pearlCatch == null ? -1 : pearlCatch.catches(); }
 
-    /** VexBot and Carpet fake players. Real accounts never match. */
+    public void setDisguise(UUID id, Disguise d) { disguises.put(id, d); }
+    public Disguise disguiseOf(UUID id) { return disguises.get(id); }
+
     public static boolean isBot(ServerPlayerEntity p) {
         if (p == null) return false;
         try {
@@ -139,18 +161,18 @@ public class DeathBanMod implements ModInitializer {
 
     public void syncDeathMessageGameRule() {
         if (server == null) return;
-        String v = config.ownDeathMessages ? "false" : "true";
         try {
             server.getCommandManager().parseAndExecute(
-                    server.getCommandSource().withSilent(), "gamerule showDeathMessages " + v);
+                    server.getCommandSource().withSilent(), "gamerule showDeathMessages true");
         } catch (Throwable t) {
             LOGGER.warn("Could not set showDeathMessages", t);
         }
     }
 
-    public void setFakeNick(UUID player, String nick) { fakeNick.put(player, nick); }
-    public void clearFakeNick(UUID player) { fakeNick.remove(player); }
-    public String fakeNickOf(UUID player) { return fakeNick.get(player); }
+    private boolean isOp(ServerPlayerEntity p) {
+        return server != null && server.getPlayerManager().isOperator(
+                new net.minecraft.server.PlayerConfigEntry(p.getGameProfile()));
+    }
 
     private void onPlayerDeath(ServerPlayerEntity victim, DamageSource source) {
         boolean weOweAMessage = vanillaDeathSuppressed;
@@ -159,49 +181,72 @@ public class DeathBanMod implements ModInitializer {
         ServerPlayerEntity killer = null;
         if (source.getAttacker() instanceof ServerPlayerEntity sp) killer = sp;
 
-        boolean pvp = killer != null && killer != victim;
+        if (weOweAMessage) sendDeathMessage(victim, killer, source);
+
         UUID id = victim.getUuid();
-        String nick = fakeNick.get(id);
-        if (nick != null) {
-            UUID nickId = resolveNickId(nick);
-            PlayerDataStore.Entry ne = store.getOrCreate(nickId, nick);
-            if (ne.name == null || ne.name.isEmpty()) ne.name = nick;
-            ne.deaths = Math.min(config.maxDeaths, ne.deaths + 1);
-            ne.lastDeath = now();
-            store.save();
-            announceDeath(nick, ne.deaths);
-            if (weOweAMessage) sendDeathMessage(victim, killer, source);
-            kickLater(victim, banMessage(ne.deaths));
+        Disguise d = disguises.remove(id);
+        if (d != null) {
+            onDisguisedDeath(victim, d);
             return;
         }
 
-        if (!config.deathBanEnabled || !pvp) {
-            if (weOweAMessage) sendDeathMessage(victim, killer, source);
-            return;
-        }
+        if (!config.deathBanEnabled) return;
 
         String realName = realNameOf(victim);
         PlayerDataStore.Entry e = store.getOrCreate(id, realName);
         if (realName != null && !realName.isEmpty()) e.name = realName;
-        e.deaths = Math.min(config.maxDeaths, e.deaths + 1);
+
+        boolean forced = e.forcedNext;
+        e.forcedNext = false;
+
+        boolean eliminate;
+        if (forced) eliminate = true;
+        else if (isOp(victim) || e.immune) eliminate = false;
+        else eliminate = ThreadLocalRandom.current().nextInt(100) < config.eliminationChance;
+
+        e.deaths = eliminate ? config.maxDeaths : Math.min(config.maxDeaths, e.deaths + 1);
         e.lastDeath = now();
         store.save();
 
-        boolean op = server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(victim.getGameProfile()));
-        if (!op && e.deaths >= config.maxDeaths) {
-            dropHead(victim, e.tokenRevived);
-        } else if (ThreadLocalRandom.current().nextDouble() < config.steveHeadChance) {
-            dropAt(victim, new ItemStack(Items.PLAYER_HEAD));
+        if (e.deaths >= config.maxDeaths) {
+            announceFinal(displayNameOf(victim));
+            dropOwnHead(victim, e.tokenRevived);
+        } else {
+            announceDeath(displayNameOf(victim), e.deaths);
+            if (ThreadLocalRandom.current().nextDouble() < config.steveHeadChance) {
+                dropAt(victim, new ItemStack(Items.PLAYER_HEAD));
+            }
         }
-        announceDeath(displayNameOf(victim), e.deaths);
-        if (weOweAMessage) sendDeathMessage(victim, killer, source);
 
         kickLater(victim, banMessage(e.deaths));
-        if (op) {
-            e.deaths = Math.max(0, e.deaths - 1);
-            e.lastDeath = 0;
-            store.save();
+    }
+
+    private void onDisguisedDeath(ServerPlayerEntity victim, Disguise d) {
+        UUID pid = resolveNameId(d.name);
+        PlayerDataStore.Entry pe = store.getOrCreate(pid, d.name);
+        if (pe.name == null || pe.name.isEmpty()) pe.name = d.name;
+
+        int shown;
+        if (d.death) shown = config.maxDeaths;
+        else if (d.lives != null) shown = d.lives + 1;
+        else shown = pe.deaths + 1;
+        shown = Math.max(1, Math.min(config.maxDeaths, shown));
+
+        pe.deaths = shown;
+        pe.lastDeath = now();
+        store.save();
+
+        if (shown >= config.maxDeaths) {
+            announceFinal(displayNameOf(victim));
+            dropNamedHead(victim, d.name, pe.tokenRevived);
+        } else {
+            announceDeath(displayNameOf(victim), shown);
+            if (ThreadLocalRandom.current().nextDouble() < config.steveHeadChance) {
+                dropAt(victim, new ItemStack(Items.PLAYER_HEAD));
+            }
         }
+
+        kickLater(victim, banMessage(shown));
     }
 
     private void sendDeathMessage(ServerPlayerEntity victim, ServerPlayerEntity killer, DamageSource source) {
@@ -228,13 +273,25 @@ public class DeathBanMod implements ModInitializer {
                 .formatted(Formatting.RED));
     }
 
-    private void dropHead(ServerPlayerEntity victim, boolean wasTokenRevived) {
+    private void announceFinal(String who) {
+        broadcast(Text.literal(who + " can no longer respawn.").formatted(Formatting.RED));
+    }
+
+    private void dropOwnHead(ServerPlayerEntity victim, boolean wasTokenRevived) {
         ItemStack head = new ItemStack(Items.PLAYER_HEAD);
-        head.set(net.minecraft.component.DataComponentTypes.PROFILE,
-                net.minecraft.component.type.ProfileComponent.ofStatic(victim.getGameProfile()));
+        head.set(DataComponentTypes.PROFILE, ProfileComponent.ofStatic(victim.getGameProfile()));
         if (wasTokenRevived) {
-            head.set(net.minecraft.component.DataComponentTypes.CUSTOM_NAME,
+            head.set(DataComponentTypes.CUSTOM_NAME,
                     Text.literal(victim.getGameProfile().name()).formatted(Formatting.RED));
+        }
+        dropAt(victim, head);
+    }
+
+    private void dropNamedHead(ServerPlayerEntity victim, String name, boolean wasTokenRevived) {
+        ItemStack head = new ItemStack(Items.PLAYER_HEAD);
+        head.set(DataComponentTypes.PROFILE, ProfileComponent.ofDynamic(name));
+        if (wasTokenRevived) {
+            head.set(DataComponentTypes.CUSTOM_NAME, Text.literal(name).formatted(Formatting.RED));
         }
         dropAt(victim, head);
     }
@@ -252,8 +309,6 @@ public class DeathBanMod implements ModInitializer {
     }
 
     public String displayNameOf(ServerPlayerEntity p) {
-        String nick = fakeNick.get(p.getUuid());
-        if (nick != null) return nick;
         try {
             String shown = p.getDisplayName() == null ? null : p.getDisplayName().getString();
             if (shown != null && !shown.isEmpty()) return shown;
@@ -266,14 +321,14 @@ public class DeathBanMod implements ModInitializer {
         return p.getGameProfile().name();
     }
 
-    public UUID resolveNickId(String nick) {
-        UUID existing = store.findByName(nick);
-        if (existing != null) return existing;
+    public UUID resolveNameId(String name) {
         if (server != null) {
-            ServerPlayerEntity online = server.getPlayerManager().getPlayer(nick);
+            ServerPlayerEntity online = server.getPlayerManager().getPlayer(name);
             if (online != null) return online.getUuid();
         }
-        return PlayerDataStore.offlineIdFor(nick);
+        UUID existing = store.findByName(name);
+        if (existing != null) return existing;
+        return PlayerDataStore.offlineIdFor(name);
     }
 
     private void kickLater(ServerPlayerEntity player, String reason) {
@@ -292,7 +347,7 @@ public class DeathBanMod implements ModInitializer {
     }
 
     public String banMessage(int deaths) {
-        if (deaths >= config.maxDeaths) return "You have died " + config.maxDeaths + " times. You are PERMANENTLY death-banned.";
+        if (deaths >= config.maxDeaths) return "You can no longer respawn.";
         return "You died (death #" + deaths + "). You are banned for " + formatDuration(banDurationFor(deaths)) + ".";
     }
 
@@ -319,11 +374,14 @@ public class DeathBanMod implements ModInitializer {
 
     private void onJoin(ServerPlayerEntity player) {
         syncDeathMessageGameRule();
+        PlayerDataStore.Entry e = store.getOrCreate(player.getUuid(), realNameOf(player));
+        e.name = realNameOf(player);
+        e.lastJoin = now();
+        if (e.deaths > config.maxDeaths) { e.deaths = 4; e.lastDeath = 0; }
+        store.save();
         if (!config.deathBanEnabled) return;
-        PlayerDataStore.Entry e = store.get(player.getUuid());
-        if (e != null && e.deaths > config.maxDeaths) { e.deaths = 4; e.lastDeath = 0; store.save(); }
-        if (e == null || e.deaths <= 0) return;
-        if (server != null && server.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(player.getGameProfile()))) return;
+        if (e.deaths <= 0) return;
+        if (isOp(player)) return;
 
         if (e.deaths >= config.maxDeaths) {
             player.networkHandler.disconnect(Text.literal(banMessage(e.deaths)));
@@ -335,10 +393,6 @@ public class DeathBanMod implements ModInitializer {
             player.networkHandler.disconnect(Text.literal(
                     "You are death-banned. Time remaining: " + formatDuration(remaining)));
         }
-    }
-
-    private void onDisconnect(ServerPlayerEntity player) {
-        clearFakeNick(player.getUuid());
     }
 
     public boolean isInvisible(ServerPlayerEntity p) {
