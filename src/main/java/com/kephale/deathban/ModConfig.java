@@ -16,6 +16,7 @@ public final class ModConfig {
     public int maxDeaths = 5;
     public int reviveDeaths = 3;
     public double steveHeadChance = 0.30;
+    public int eliminationChance = 20;
     public boolean hideInvisibleKillers = true;
     public boolean ownDeathMessages = true;
     public boolean hideBotConnectionMessages = true;
@@ -23,6 +24,8 @@ public final class ModConfig {
     public boolean pearlCatchEnabled = true;
     public double pearlCollisionRadius = 2.5;
     public double pearlMinFlightDistance = 3.0;
+
+    public boolean tabListNearbyOnly = true;
 
     private transient Path file;
 
@@ -41,11 +44,11 @@ public final class ModConfig {
             cfg = new ModConfig();
         }
         cfg.file = f;
-        // PearlCatch always comes back on at startup. Turn it off with
-        // /pearlcatch off and it stays off only until the next restart.
         cfg.pearlCatchEnabled = true;
         if (cfg.pearlCollisionRadius < 0.5) cfg.pearlCollisionRadius = 2.5;
         if (cfg.pearlMinFlightDistance < 0) cfg.pearlMinFlightDistance = 3.0;
+        if (cfg.eliminationChance < 0) cfg.eliminationChance = 0;
+        if (cfg.eliminationChance > 100) cfg.eliminationChance = 100;
         cfg.save();
         return cfg;
     }
