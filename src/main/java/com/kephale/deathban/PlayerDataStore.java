@@ -15,13 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Persistent death records.
- *
- * <p>Stored as JSON at {@code config/deathban/players.json} so it can be opened,
- * edited and backed up by hand. Also knows how to import the Bukkit-era
- * {@code players.yml} so data carries over from the Paper server.
- */
 public final class PlayerDataStore {
 
     public static final class Entry {
@@ -29,10 +22,19 @@ public final class PlayerDataStore {
         public String name;
         public long lastDeath;
         public boolean tokenRevived;
+        public boolean immune;
+        public boolean forcedNext;
+        public long lastJoin;
 
         public Entry() {}
 
         public Entry(String name) { this.name = name; }
+
+        @Override
+        public String toString() {
+            return name + " deaths=" + deaths + " immune=" + immune
+                    + " forcedNext=" + forcedNext + " tokenRevived=" + tokenRevived;
+        }
     }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -44,8 +46,6 @@ public final class PlayerDataStore {
     public PlayerDataStore(Path configDir) {
         this.file = configDir.resolve("players.json");
     }
-
-    // ---------- load / save ----------
 
     public void load() {
         data.clear();
@@ -76,8 +76,6 @@ public final class PlayerDataStore {
         }
     }
 
-    // ---------- access ----------
-
     public Entry get(UUID id) { return data.get(id); }
 
     public Entry getOrCreate(UUID id, String name) {
@@ -86,8 +84,6 @@ public final class PlayerDataStore {
             e = new Entry(name);
             data.put(id, e);
         }
-        // Never overwrite an existing name - it may be a nick, and clobbering it
-        // corrupts name-based lookups.
         if (name != null && (e.name == null || e.name.isEmpty())) e.name = name;
         return e;
     }
@@ -95,10 +91,23 @@ public final class PlayerDataStore {
     public Map<UUID, Entry> all() { return data; }
 
     public UUID findByName(String name) {
+        UUID fallback = null;
         for (Map.Entry<UUID, Entry> e : data.entrySet()) {
-            if (e.getValue().name != null && e.getValue().name.equalsIgnoreCase(name)) return e.getKey();
+            String n = e.getValue().name;
+            if (n == null || !n.equalsIgnoreCase(name)) continue;
+            if (e.getKey().version() == 4) return e.getKey();
+            if (fallback == null) fallback = e.getKey();
         }
-        return null;
+        return fallback;
+    }
+
+    public List<UUID> idsByName(String name) {
+        List<UUID> out = new ArrayList<>();
+        for (Map.Entry<UUID, Entry> e : data.entrySet()) {
+            String n = e.getValue().name;
+            if (n != null && n.equalsIgnoreCase(name)) out.add(e.getKey());
+        }
+        return out;
     }
 
     public List<UUID> banned(int threshold) {
@@ -109,27 +118,10 @@ public final class PlayerDataStore {
         return out;
     }
 
-    /** Stable record id for a nick that may not be a real account. */
     public static UUID offlineIdFor(String name) {
         return UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
     }
 
-    // ---------- transfer ----------
-
-    /**
-     * Import the Bukkit plugin's {@code players.yml}. Deliberately a small
-     * hand-rolled parser rather than a YAML dependency - the file shape is fixed:
-     *
-     * <pre>
-     * players:
-     *   &lt;uuid&gt;:
-     *     deaths: 3
-     *     name: Someone
-     *     lastDeath: 1783040219661
-     * </pre>
-     *
-     * @return number of records imported
-     */
     public int importLegacyYaml(Path yaml, boolean overwrite) throws IOException {
         List<String> lines = Files.readAllLines(yaml, StandardCharsets.UTF_8);
         int imported = 0;
@@ -144,7 +136,6 @@ public final class PlayerDataStore {
 
             int indent = line.length() - line.stripLeading().length();
 
-            // A UUID key sits at the first indent level and ends with ':'
             if (indent <= 2 && trimmed.endsWith(":")) {
                 if (current != null && entry != null) {
                     if (overwrite || !data.containsKey(current)) { data.put(current, entry); imported++; }
@@ -183,7 +174,6 @@ public final class PlayerDataStore {
         return imported;
     }
 
-    /** Write a timestamped copy next to the live file. */
     public Path export() throws IOException {
         Files.createDirectories(file.getParent());
         Path out = file.getParent().resolve("players-export-" + System.currentTimeMillis() + ".json");
@@ -193,7 +183,6 @@ public final class PlayerDataStore {
         return out;
     }
 
-    /** Merge another JSON export into this store. */
     public int importJson(Path json, boolean overwrite) throws IOException {
         String text = Files.readString(json, StandardCharsets.UTF_8);
         Map<String, Entry> raw = GSON.fromJson(text, MAP_TYPE);
