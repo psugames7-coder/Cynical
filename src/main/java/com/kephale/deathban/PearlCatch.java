@@ -21,8 +21,6 @@ public final class PearlCatch {
 
     private final List<EnderPearlEntity> pearls = new ArrayList<>();
     private final List<WindChargeEntity> charges = new ArrayList<>();
-
-    /** Charges whose hitbox we grew, so we only ever shrink those. */
     private final Set<WindChargeEntity> grown = new HashSet<>();
 
     public PearlCatch(DeathBanMod mod) { this.mod = mod; }
@@ -40,11 +38,10 @@ public final class PearlCatch {
             if (entity instanceof EnderPearlEntity p) pearls.remove(p);
             else if (entity instanceof WindChargeEntity c) { charges.remove(c); grown.remove(c); }
         });
-        ServerTickEvents.END_WORLD_TICK.register(this::tickWorld);
+        ServerTickEvents.START_WORLD_TICK.register(this::tickWorld);
     }
 
     private void tickWorld(ServerWorld world) {
-        // Nothing in flight: two checks and out. No pearls means no work at all.
         if (pearls.isEmpty() || charges.isEmpty()) {
             if (!grown.isEmpty()) shrinkAll();
             return;
@@ -71,12 +68,18 @@ public final class PearlCatch {
             boolean near = nearEligiblePearl(world, cp, radius, minFlight);
 
             if (near) {
+                Vec3d cv = charge.getVelocity();
+                double x1 = Math.min(cp.x, cp.x + cv.x);
+                double y1 = Math.min(cp.y, cp.y + cv.y);
+                double z1 = Math.min(cp.z, cp.z + cv.z);
+                double x2 = Math.max(cp.x, cp.x + cv.x);
+                double y2 = Math.max(cp.y, cp.y + cv.y);
+                double z2 = Math.max(cp.z, cp.z + cv.z);
                 charge.setBoundingBox(new Box(
-                        cp.x - radius, cp.y - radius, cp.z - radius,
-                        cp.x + radius, cp.y + radius, cp.z + radius));
+                        x1 - radius, y1 - radius, z1 - radius,
+                        x2 + radius, y2 + radius, z2 + radius));
                 grown.add(charge);
             } else if (grown.remove(charge)) {
-                // Only shrink one we actually grew.
                 charge.setPosition(cp.x, cp.y, cp.z);
             }
         }
