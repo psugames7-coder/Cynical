@@ -153,6 +153,11 @@ public final class Commands {
                                     }))))
             );
 
+            dispatcher.register(literal("deathmessages")
+                    .executes(ctx -> redStatus(ctx, mod))
+                    .then(literal("on").executes(ctx -> redSet(ctx, mod, false)))
+                    .then(literal("off").executes(ctx -> redSet(ctx, mod, true))));
+
             dispatcher.register(literal("disguise")
                     .requires(Commands::isAdmin)
                     .then(argument("player", EntityArgumentType.player())
@@ -167,7 +172,10 @@ public final class Commands {
                     .executes(ctx -> {
                         msg(ctx, "PearlCatch " + onOff(mod.config.pearlCatchEnabled)
                                 + " | radius " + mod.config.pearlCollisionRadius
-                                + " | minflight " + mod.config.pearlMinFlightDistance);
+                                + " | minflight " + mod.config.pearlMinFlightDistance
+                                + " | blockzone " + mod.config.pearlBlockZone
+                                + " | blendzone " + mod.config.pearlBlendZone
+                                + " | ipcwindow " + mod.config.pearlIpcWindowMs + "ms");
                         return 1;
                     })
                     .then(literal("on").executes(ctx -> {
@@ -189,7 +197,31 @@ public final class Commands {
                                 mod.config.pearlMinFlightDistance = DoubleArgumentType.getDouble(ctx, "v");
                                 mod.config.save();
                                 msg(ctx, "Min pearl flight " + mod.config.pearlMinFlightDistance); return 1;
-                            }))));
+                            })))
+                    .then(literal("blockzone").then(argument("v", DoubleArgumentType.doubleArg(0.0, 20.0))
+                            .executes(ctx -> {
+                                mod.config.pearlBlockZone = DoubleArgumentType.getDouble(ctx, "v");
+                                mod.config.save();
+                                msg(ctx, "Same-block zone " + mod.config.pearlBlockZone + " blocks"); return 1;
+                            })))
+                    .then(literal("blendzone").then(argument("v", DoubleArgumentType.doubleArg(0.0, 10.0))
+                            .executes(ctx -> {
+                                mod.config.pearlBlendZone = DoubleArgumentType.getDouble(ctx, "v");
+                                mod.config.save();
+                                msg(ctx, "Blend zone " + mod.config.pearlBlendZone + " blocks"); return 1;
+                            })))
+                    .then(literal("ipcwindow").then(argument("ms", DoubleArgumentType.doubleArg(0.0, 100.0))
+                            .executes(ctx -> {
+                                mod.config.pearlIpcWindowMs = DoubleArgumentType.getDouble(ctx, "ms");
+                                mod.config.save();
+                                msg(ctx, "Insta catch window " + mod.config.pearlIpcWindowMs + "ms"); return 1;
+                            })))
+                    .then(literal("debug").executes(ctx -> {
+                        PearlCatch pc = mod.pearlCatch();
+                        if (pc == null) return 0;
+                        pc.debug = !pc.debug;
+                        msg(ctx, "PearlCatch debug " + onOff(pc.debug)); return 1;
+                    })));
         });
     }
 
@@ -214,7 +246,9 @@ public final class Commands {
                 "§6=== Disguise ===",
                 "§715. §e/disguise <player> <name> [lives|death]",
                 "§6=== PearlCatch ===",
-                "§716. §e/pearlcatch [on|off|radius <v>|minflight <v>]"
+                "§716. §e/pearlcatch [on|off|debug|radius|minflight|blockzone|blendzone|ipcwindow <v>]",
+                "§6=== Everyone ===",
+                "§717. §e/deathmessages [on|off] §7- red death lines, just for you"
         };
         for (String l : lines) src.sendFeedback(() -> Text.literal(l), false);
         return 1;
@@ -447,6 +481,25 @@ public final class Commands {
     }
 
     private static String onOff(boolean b) { return b ? "§aON" : "§cOFF"; }
+
+    private static int redStatus(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
+        ServerPlayerEntity p = ctx.getSource().getPlayer();
+        if (p == null) { msg(ctx, "§cRun this in-game."); return 0; }
+        PlayerDataStore.Entry e = mod.store.get(p.getUuid());
+        boolean hidden = e != null && e.hideRedDeaths;
+        msg(ctx, "§7Red death messages are " + (hidden ? "§cOFF" : "§aON") + "§7 for you. Use §e/deathmessages on§7 or §e/deathmessages off§7.");
+        return 1;
+    }
+
+    private static int redSet(CommandContext<ServerCommandSource> ctx, DeathBanMod mod, boolean hide) {
+        ServerPlayerEntity p = ctx.getSource().getPlayer();
+        if (p == null) { msg(ctx, "§cRun this in-game."); return 0; }
+        PlayerDataStore.Entry e = mod.store.getOrCreate(p.getUuid(), p.getGameProfile().name());
+        e.hideRedDeaths = hide;
+        mod.store.save();
+        msg(ctx, "§7Red death messages turned " + (hide ? "§cOFF" : "§aON") + "§7 for you.");
+        return 1;
+    }
 
     private static int debug(CommandContext<ServerCommandSource> ctx, DeathBanMod mod) {
         ServerPlayerEntity p = ctx.getSource().getPlayer();
