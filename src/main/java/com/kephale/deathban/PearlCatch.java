@@ -212,5 +212,70 @@ public final class PearlCatch {
         }
 
         if (debug && partner.getOwner() instanceof ServerPlayerEntity thrower) {
-            thrower.sendMessage(Text.literal(
-                    "§dIPC" + (partnerOffhand ? " offhand" : "") + "
+            String head = partnerOffhand ? "§dIPC offhand" : "§dIPC";
+            String touch = "";
+            if (flight <= blockZone) {
+                touch = normal.intersects(cell) ? " §a(in pearl's block)" : " §8(not touching)";
+            }
+            String line = head + " §7gap " + ms(partnerGap) + "ms";
+            line = line + " | pearl " + String.format("%.1f", flight) + " blocks";
+            line = line + " | §f" + zone + touch;
+            thrower.sendMessage(Text.literal(line), true);
+        }
+
+        return result == normal ? null : result;
+    }
+
+    private static String ms(long nanos) {
+        return String.format("%.1f", nanos / 1_000_000.0);
+    }
+
+    private static Box normalBox(Entity e, Vec3d p) {
+        double hw = e.getWidth() / 2.0;
+        return new Box(p.x - hw, p.y, p.z - hw, p.x + hw, p.y + e.getHeight(), p.z + hw);
+    }
+
+    private double flightOf(EnderPearlEntity pearl) {
+        Vec3d start = launched.get(pearl);
+        if (start != null) return pearl.getEntityPos().distanceTo(start);
+        if (pearl.getOwner() instanceof ServerPlayerEntity thrower) {
+            return pearl.getEntityPos().distanceTo(thrower.getEntityPos());
+        }
+        return Double.MAX_VALUE;
+    }
+
+    private static Box modBox(Vec3d cp, Vec3d cv, double radius) {
+        return new Box(
+                Math.min(cp.x, cp.x + cv.x) - radius,
+                Math.min(cp.y, cp.y + cv.y) - radius,
+                Math.min(cp.z, cp.z + cv.z) - radius,
+                Math.max(cp.x, cp.x + cv.x) + radius,
+                Math.max(cp.y, cp.y + cv.y) + radius,
+                Math.max(cp.z, cp.z + cv.z) + radius);
+    }
+
+    private static Box blockCell(Vec3d p) {
+        double x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+        return new Box(x, y, z, x + 1.0, y + 1.0, z + 1.0);
+    }
+
+    private static Box lerp(Box a, Box b, double t) {
+        return new Box(
+                a.minX + (b.minX - a.minX) * t,
+                a.minY + (b.minY - a.minY) * t,
+                a.minZ + (b.minZ - a.minZ) * t,
+                a.maxX + (b.maxX - a.maxX) * t,
+                a.maxY + (b.maxY - a.maxY) * t,
+                a.maxZ + (b.maxZ - a.maxZ) * t);
+    }
+
+    private void shrinkAll() {
+        for (WindChargeEntity c : new ArrayList<>(grown)) {
+            if (!c.isRemoved()) {
+                Vec3d p = c.getEntityPos();
+                c.setPosition(p.x, p.y, p.z);
+            }
+        }
+        grown.clear();
+    }
+}
