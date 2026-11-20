@@ -390,3 +390,28 @@ public class DeathBanMod implements ModInitializer {
 
     private void onJoin(ServerPlayerEntity player) {
         syncDeathMessageGameRule();
+        PlayerDataStore.Entry e = store.getOrCreate(player.getUuid(), realNameOf(player));
+        e.name = realNameOf(player);
+        e.lastJoin = now();
+        if (e.deaths > config.maxDeaths) { e.deaths = 4; e.lastDeath = 0; }
+        store.save();
+        if (!config.deathBanEnabled) return;
+        if (e.deaths <= 0) return;
+        if (isOp(player)) return;
+
+        if (e.deaths >= config.maxDeaths) {
+            player.networkHandler.disconnect(Text.literal(banMessage(e.deaths)));
+            return;
+        }
+        long until = e.lastDeath + banDurationFor(e.deaths);
+        long remaining = until - now();
+        if (remaining > 0) {
+            player.networkHandler.disconnect(Text.literal(
+                    "You are death-banned. Time remaining: " + formatDuration(remaining)));
+        }
+    }
+
+    public boolean isInvisible(ServerPlayerEntity p) {
+        return p != null && (p.isInvisible() || p.hasStatusEffect(StatusEffects.INVISIBILITY));
+    }
+}
