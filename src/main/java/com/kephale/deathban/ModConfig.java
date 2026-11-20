@@ -24,6 +24,9 @@ public final class ModConfig {
     public boolean pearlCatchEnabled = true;
     public double pearlCollisionRadius = 2.5;
     public double pearlMinFlightDistance = 3.0;
+    public double pearlBlockZone = 4.0;
+    public double pearlBlendZone = 1.0;
+    public double pearlIpcWindowMs = 9.0;
 
     public boolean tabListNearbyOnly = true;
 
@@ -47,6 +50,9 @@ public final class ModConfig {
         cfg.pearlCatchEnabled = true;
         if (cfg.pearlCollisionRadius < 0.5) cfg.pearlCollisionRadius = 2.5;
         if (cfg.pearlMinFlightDistance < 0) cfg.pearlMinFlightDistance = 3.0;
+        if (cfg.pearlBlockZone < 0) cfg.pearlBlockZone = 4.0;
+        if (cfg.pearlBlendZone < 0) cfg.pearlBlendZone = 1.0;
+        if (cfg.pearlIpcWindowMs < 0) cfg.pearlIpcWindowMs = 9.0;
         if (cfg.eliminationChance < 0) cfg.eliminationChance = 0;
         if (cfg.eliminationChance > 100) cfg.eliminationChance = 100;
         cfg.save();
