@@ -30,7 +30,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DeathBanMod implements ModInitializer {
 
     public static final String MOD_ID = "deathban";
-    public static final String VERSION = "1.5.0";
+    public static final String VERSION = "1.6.4";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     public static DeathBanMod INSTANCE;
@@ -107,6 +107,7 @@ public class DeathBanMod implements ModInitializer {
     public int pearlCatchTrackedPearls() { return pearlCatch == null ? -1 : pearlCatch.trackedPearls(); }
     public int pearlCatchTrackedCharges() { return pearlCatch == null ? -1 : pearlCatch.trackedCharges(); }
     public int pearlCatchCount() { return pearlCatch == null ? -1 : pearlCatch.catches(); }
+    public PearlCatch pearlCatch() { return pearlCatch; }
 
     public void setDisguise(UUID id, Disguise d) { disguises.put(id, d); }
     public Disguise disguiseOf(UUID id) { return disguises.get(id); }
@@ -149,6 +150,21 @@ public class DeathBanMod implements ModInitializer {
         writingOwn = true;
         try {
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                p.sendMessage(text, false);
+            }
+        } finally {
+            writingOwn = false;
+        }
+        LOGGER.info(text.getString());
+    }
+
+    public void broadcastRed(Text text) {
+        if (server == null) return;
+        writingOwn = true;
+        try {
+            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                PlayerDataStore.Entry e = store.get(p.getUuid());
+                if (e != null && e.hideRedDeaths) continue;
                 p.sendMessage(text, false);
             }
         } finally {
@@ -269,12 +285,12 @@ public class DeathBanMod implements ModInitializer {
     }
 
     private void announceDeath(String who, int deaths) {
-        broadcast(Text.literal(who + " is now on " + deaths + " death" + (deaths == 1 ? "" : "s") + ".")
+        broadcastRed(Text.literal(who + " is now on " + deaths + " death" + (deaths == 1 ? "" : "s") + ".")
                 .formatted(Formatting.RED));
     }
 
     private void announceFinal(String who) {
-        broadcast(Text.literal(who + " can no longer respawn.").formatted(Formatting.RED));
+        broadcastRed(Text.literal(who + " can no longer respawn.").formatted(Formatting.RED));
     }
 
     private void dropOwnHead(ServerPlayerEntity victim, boolean wasTokenRevived) {
