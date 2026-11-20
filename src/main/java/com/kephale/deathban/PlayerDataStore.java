@@ -25,6 +25,7 @@ public final class PlayerDataStore {
         public boolean immune;
         public boolean forcedNext;
         public long lastJoin;
+        public boolean hideRedDeaths;
 
         public Entry() {}
 
